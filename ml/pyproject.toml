@@ -1,0 +1,20 @@
+[project]
+name = "graption-ml"
+version = "0.1.0"
+description = "Graption training code: speaker detection (asd), tone, shared feature spec."
+requires-python = ">=3.11"
+# Heavy deps (torch, mediapipe, coremltools, wandb, transformers) get added as an optional
+# extra when training code lands, so `uv sync` stays light for server/CI.
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Import as `ml.common.features` (matches the repo path): the editable install puts the
+# repo root on sys.path.
+[tool.hatch.build]
+dev-mode-dirs = [".."]
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true

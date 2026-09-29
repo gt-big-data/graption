@@ -1,0 +1,17 @@
+[project]
+name = "graption-language"
+version = "0.1.0"
+description = "Graption summaries/notes: prototypes and OpenAI/Ollama benchmarks (platform team)."
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Import as `language.*`: the editable install puts the repo root on sys.path.
+[tool.hatch.build]
+dev-mode-dirs = [".."]
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true

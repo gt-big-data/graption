@@ -1,0 +1,8 @@
+// Shared build settings for the Graption app target (committed).
+// Per-developer signing lives in Local.xcconfig (gitignored). Copy Local.xcconfig.example to start.
+
+// Free Apple IDs can't share a bundle ID, so each developer gets their own suffix.
+DEV_SUFFIX = dev
+PRODUCT_BUNDLE_IDENTIFIER = edu.gatech.graption.$(DEV_SUFFIX)
+
+#include? "Local.xcconfig"

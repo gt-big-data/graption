@@ -1,0 +1,8 @@
+// Copy to Local.xcconfig (gitignored) and fill in. Never commit Local.xcconfig.
+
+// Your Apple team ID: Xcode → Settings → Accounts → select your team (10 characters),
+// or copy it from Signing & Capabilities after picking your team once.
+DEVELOPMENT_TEAM = XXXXXXXXXX
+
+// Anything unique to you, lowercase letters/numbers only. Bundle ID becomes edu.gatech.graption.<this>
+DEV_SUFFIX = yourname
