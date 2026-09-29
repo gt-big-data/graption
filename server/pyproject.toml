@@ -1,0 +1,22 @@
+[project]
+name = "graption-server"
+version = "0.1.0"
+description = "Graption tone server (FastAPI). Runs on the Mac, behind a tunnel, or on Cloud Run."
+requires-python = ">=3.11"
+# Keep torch/mediapipe OUT of here (the server image must stay lean).
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic-settings>=2.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Code goes in server/app/ (see README). Editable install exposes it as `app`.
+[tool.hatch.build]
+dev-mode-dirs = ["."]
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true

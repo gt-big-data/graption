@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gt-big-data/graption/schemas/events.schema.json",
+  "title": "GraptionEvent",
+  "description": "Graption event contract v1.0 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds since session start on the phone's monotonic host clock. Changing this file = bump schema_version and regenerate Pydantic + Swift types.",
+  "oneOf": [
+    { "$ref": "#/$defs/SpeakerScores" },
+    { "$ref": "#/$defs/Caption" },
+    { "$ref": "#/$defs/SoundEvent" },
+    { "$ref": "#/$defs/ToneRequest" },
+    { "$ref": "#/$defs/CaptionLog" },
+    { "$ref": "#/$defs/ToneResult" }
+  ],
+  "$defs": {
+    "SchemaVersion": { "type": "string", "const": "1.0" },
+    "SessionId": { "type": "string", "minLength": 1 },
+    "Seconds": { "type": "number", "minimum": 0 },
+    "Probability": { "type": "number", "minimum": 0, "maximum": 1 },
+    "CaptionId": { "type": "string", "format": "uuid" },
+    "FaceId": {
+      "type": "string",
+      "pattern": "^f[1-9][0-9]*$",
+      "description": "Per-session track id assigned by FaceTracker: f1, f2, ..."
+    },
+    "FaceScore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["face_id", "p", "bbox"],
+      "properties": {
+        "face_id": { "$ref": "#/$defs/FaceId" },
+        "p": { "$ref": "#/$defs/Probability", "description": "Smoothed p(speaking)." },
+        "bbox": {
+          "type": "array",
+          "description": "[x, y, w, h]",
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4
+        }
+      }
+    },
+    "SpeakerScores": {
+      "type": "object",
+      "description": "On-device. Emitted per video frame.",
+      "additionalProperties": false,
+      "required": ["type", "session_id", "schema_version", "t", "faces"],
+      "properties": {
+        "type": { "const": "speaker_scores" },
+        "session_id": { "$ref": "#/$defs/SessionId" },
+        "schema_version": { "$ref": "#/$defs/SchemaVersion" },
+        "t": { "$ref": "#/$defs/Seconds" },
+        "faces": { "type": "array", "items": { "$ref": "#/$defs/FaceScore" } }
+      }
+    },
+    "Caption": {
+      "type": "object",
+      "description": "On-device. Emitted when WhisperKit finishes a segment.",
+      "additionalProperties": false,
+      "required": [
+        "type", "session_id", "schema_version", "caption_id",
+        "t_start", "t_end", "text", "speaker_id", "model_versions"
+      ],
+      "properties": {
+        "type": { "const": "caption" },
+        "session_id": { "$ref": "#/$defs/SessionId" },
+        "schema_version": { "$ref": "#/$defs/SchemaVersion" },
+        "caption_id": { "$ref": "#/$defs/CaptionId" },
+        "t_start": { "$ref": "#/$defs/Seconds" },
+        "t_end": { "$ref": "#/$defs/Seconds" },
+        "text": { "type": "string" },
+        "speaker_id": {
+          "description": "Face id chosen by fusion, or \"unknown\" (off-screen/ambiguous; shown as \"Someone\").",
+          "anyOf": [{ "$ref": "#/$defs/FaceId" }, { "const": "unknown" }]
+        },
+        "model_versions": {
+          "type": "object",
+          "required": ["asr", "asd"],
+          "properties": {
+            "asr": { "type": "string", "examples": ["whisperkit-base.en"] },
+            "asd": { "type": "string", "examples": ["asd-v3"] }
+          },
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "SoundEvent": {
+      "type": "object",
+      "description": "On-device. SoundAnalysis alert (allowlisted labels, confidence >= 0.7).",
+      "additionalProperties": false,
+      "required": ["type", "session_id", "schema_version", "t", "label", "confidence"],
+      "properties": {
+        "type": { "const": "sound_event" },
+        "session_id": { "$ref": "#/$defs/SessionId" },
+        "schema_version": { "$ref": "#/$defs/SchemaVersion" },
+        "t": { "$ref": "#/$defs/Seconds" },
+        "label": { "type": "string", "examples": ["doorbell"] },
+        "confidence": { "$ref": "#/$defs/Probability" }
+      }
+    },
+    "ToneRequest": {
+      "type": "object",
+      "description": "Phone -> tone server. One per VAD segment.",
+      "additionalProperties": false,
+      "required": [
+        "type", "session_id", "schema_version", "caption_id",
+        "t_start", "t_end", "sample_rate", "audio_b64"
+      ],
+      "properties": {
+        "type": { "const": "tone_request" },
+        "session_id": { "$ref": "#/$defs/SessionId" },
+        "schema_version": { "$ref": "#/$defs/SchemaVersion" },
+        "caption_id": { "$ref": "#/$defs/CaptionId" },
+        "t_start": { "$ref": "#/$defs/Seconds" },
+        "t_end": { "$ref": "#/$defs/Seconds" },
+        "sample_rate": { "type": "integer", "minimum": 1, "examples": [16000] },
+        "audio_b64": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "description": "PCM16 mono little-endian. Never written to disk or logs."
+        }
+      }
+    },
+    "CaptionLog": {
+      "type": "object",
+      "description": "Phone -> tone server. Final fused caption, for evaluation.",
+      "additionalProperties": false,
+      "required": ["type", "session_id", "schema_version", "caption", "tone_tag"],
+      "properties": {
+        "type": { "const": "caption_log" },
+        "session_id": { "$ref": "#/$defs/SessionId" },
+        "schema_version": { "$ref": "#/$defs/SchemaVersion" },
+        "caption": { "$ref": "#/$defs/Caption" },
+        "tone_tag": { "type": ["string", "null"], "examples": ["excited"] }
+      }
+    },
+    "ToneResult": {
+      "type": "object",
+      "description": "Tone server -> phone. tag is null when not confident (a wrong tag is worse than none). Tag vocabulary depends on backend: custom = the 6 emotions minus neutral; audeering baseline = excited | upset | calm.",
+      "additionalProperties": false,
+      "required": [
+        "type", "session_id", "schema_version", "caption_id",
+        "tag", "probs", "model_version", "latency_ms"
+      ],
+      "properties": {
+        "type": { "const": "tone_result" },
+        "session_id": { "$ref": "#/$defs/SessionId" },
+        "schema_version": { "$ref": "#/$defs/SchemaVersion" },
+        "caption_id": { "$ref": "#/$defs/CaptionId" },
+        "tag": { "type": ["string", "null"], "examples": ["happy"] },
+        "probs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["anger", "disgust", "fear", "happy", "neutral", "sad"],
+          "properties": {
+            "anger": { "$ref": "#/$defs/Probability" },
+            "disgust": { "$ref": "#/$defs/Probability" },
+            "fear": { "$ref": "#/$defs/Probability" },
+            "happy": { "$ref": "#/$defs/Probability" },
+            "neutral": { "$ref": "#/$defs/Probability" },
+            "sad": { "$ref": "#/$defs/Probability" }
+          }
+        },
+        "model_version": { "type": "string", "examples": ["tone-head-v2"] },
+        "latency_ms": {
+          "type": "object",
+          "required": ["recv_to_send"],
+          "properties": { "recv_to_send": { "type": "number", "minimum": 0 } },
+          "additionalProperties": { "type": "number", "minimum": 0 }
+        }
+      }
+    }
+  }
+}
