@@ -99,7 +99,7 @@ Long-term, the tone model moves on-device (Core ML), which removes the server en
 | Training | PACE GPUs, PyTorch, Weights & Biases (free/academic tier) |
 | Labeling | Label Studio (own recordings) |
 | Schema | JSON Schema → Pydantic (`datamodel-code-generator`) + Swift (`quicktype`) |
-| LLM (language team) | Target: Apple Foundation Models (on-device, free). Benchmark: OpenAI API (small models). Prototyping: Ollama |
+| LLM (summaries, Platform team) | Target: Apple Foundation Models (on-device, free). Benchmark: OpenAI API (small models). Prototyping: Ollama |
 | CI | GitHub Actions: ruff, pytest, SwiftLint |
 
 ---
@@ -108,14 +108,15 @@ Long-term, the tone model moves on-device (Core ML), which removes the server en
 
 ```
 graption/
-├── apps/ios/Graption/        # Xcode project
-│   ├── Capture/              # camera + mic
-│   ├── Vision/               # MediaPipe wrapper, FaceTracker, FeatureBuilder, SpeakerModel
-│   ├── Audio/                # VAD, WhisperKit wrapper, SoundAnalysis, Loudness
-│   ├── Fusion/               # ScoreBuffer, Fusion
-│   ├── Network/              # ToneClient
-│   ├── UI/                   # caption views
-│   └── Debug/                # session recorder, runtime model loader
+├── apps/ios/
+│   ├── Graption/             # thin app target: entry point + wiring only
+│   └── Packages/             # local Swift packages (see section 14)
+│       ├── GraptionCore/     # generated event types, protocols, mocks, runtime model loader
+│       ├── GraptionVision/   # camera capture, MediaPipe wrapper, FaceTracker, FeatureBuilder, SpeakerModel
+│       ├── GraptionAudio/    # mic capture, Loudness, VAD, WhisperKit wrapper, SoundAnalysis
+│       ├── GraptionFusion/   # ScoreBuffer, Fusion
+│       ├── GraptionNetwork/  # ToneClient
+│       └── GraptionUI/       # caption views, alerts, past-meetings dashboard, debug recorder UI
 ├── server/                   # tone server (FastAPI): Mac, tunnel, or cloud
 │   ├── app/{main.py, ws.py, tone.py, tags.py, db.py, config.py, auth.py}
 │   └── Dockerfile
@@ -123,13 +124,24 @@ graption/
 │   ├── common/features.py    # CANONICAL feature spec (Swift mirrors it)
 │   ├── asd/                  # speaker model: extract, dataset, train, eval, export
 │   └── tone/                 # embed, train_head, eval, baseline
-├── language/                 # summarization prototypes + OpenAI benchmark scripts
+├── language/                 # summary/notes prototypes + OpenAI benchmark scripts (Platform)
 ├── schemas/events.schema.json
 ├── scripts/pace/             # SLURM job scripts
 └── docs/                     # this file, diagrams, latency results
 ```
 
 Datasets and model weights **never go in git**. Keep them on PACE storage and log model artifacts to W&B.
+
+The repo starts with only READMEs in most folders; each team creates the files above as they build.
+
+### Teams
+
+| Team | Owns | iOS packages |
+|---|---|---|
+| **Vision** | `ml/common/`, `ml/asd/` | `GraptionVision` |
+| **Audio** | `ml/tone/`, the tone backend in `server/app/tone.py` | `GraptionAudio` |
+| **Platform** | `server/`, `language/`, `schemas/`, CI, the app target | `GraptionCore`, `GraptionNetwork`, `GraptionFusion`, past-meetings dashboard + AI summaries |
+| **UI/UX** | design | `GraptionUI` (captions, highlights, tone chips, alerts) |
 
 ---
 
@@ -240,6 +252,11 @@ for caption [t0, t1]:
 - Live caption list, with the speaker name/color matching a highlight box drawn on that face.
 - Tone tag chip; sound alert banners (visual plus haptic).
 - Large and dynamic type, high contrast. Follow Apple's Accessibility HIG.
+
+**Past-meetings dashboard** (Platform)
+- Lists saved sessions. Each shows its caption log (speaker, text, tone tag) and an AI summary/notes (section 10).
+- Stores caption text, speakers, tags, and timings **on-device only**. Never audio or video.
+- Works offline. Summaries that need a model the device lacks are simply unavailable.
 
 **Debug mode**
 - Records a session: video file, per-frame `FeatureBuilder` vectors (JSONL), audio WAV, and all events.
@@ -356,9 +373,9 @@ for caption [t0, t1]:
 
 ---
 
-## 10. Language team (non-blocking)
+## 10. AI summaries and notes (Platform team, non-blocking)
 
-**Feature:** a post-session "catch me up" summary built from the caption log (speaker + text + tone).
+**Feature:** a post-session "catch me up" summary/notes built from the caption log (speaker + text + tone), shown in the past-meetings dashboard (section 6).
 - **Target:** Apple Foundation Models on-device (iOS 26+, Apple Intelligence devices). Free and offline. Use `@Generable` for structured output.
 - **Benchmark:** OpenAI API (a small, cheap model) run from Python scripts in `language/`, on exported caption logs. It sets the quality bar that the on-device version is measured against.
   - **Never** call OpenAI from the iOS app; the API key would ship inside the app.
@@ -400,7 +417,7 @@ If the device is overloaded, degrade in this order:
    - Debug recorder and team data collection
 4. **Weeks 7–9:** swap the custom models into the existing interfaces, benchmark on device, and evaluate on team recordings.
 5. **Week 9–10, test infrastructure:** tone server Docker image deployed to Cloud Run (or the tunnel fallback), and a TestFlight build with the consent screen passing Beta App Review.
-6. **Week 10+:** at-home user testing with DHH users via TestFlight, accessibility polish, and language-team summary.
+6. **Week 10+:** at-home user testing with DHH users via TestFlight, accessibility polish, and the past-meetings dashboard with AI summaries.
 
 ---
 
@@ -410,7 +427,7 @@ If the device is overloaded, degrade in this order:
 - **Features are defined once** in `ml/common/features.py`. Swift mirrors it, with a unit test on a shared fixture file.
 - **Every event and log** carries model versions.
 - **Every training run** goes to W&B, with the config committed alongside it.
-- **Branching:** PRs to `main`, CI must pass, and `CODEOWNERS` per subteam folder.
+- **Branching:** PRs to `main`, and CI must pass. Add `CODEOWNERS` per team folder once reviews are enforced.
 - **Secrets** (`TONE_TOKEN`, OpenAI key, cloud credentials) live in `.env` or `.xcconfig` files that are gitignored, never in code or the repo.
 - **Cost control:** Cloud Run scales to zero. Set a billing budget alert at 50% and 90% of the credits. OpenAI keys get a hard monthly spend limit.
 - **Licenses:** the audEERING model and MSP-Podcast are non-commercial. That's fine for this academic MVP, but flag it before any commercial use.
@@ -465,6 +482,7 @@ If the device is overloaded, degrade in this order:
 - **CREMA-D, not MSP-Podcast; openSMILE dropped:** no license paperwork. The audEERING baseline (trained on MSP-Podcast) gives natural-speech coverage for free. Both remain stretch goals, used only if tests show gaps.
 - **Tone never blocks captions,** and tone tags only show when confident. A wrong tag is worse than none for DHH users.
 - **Rule-based fusion before learned fusion:** it produces the logged data a learned version would need.
+- **Platform owns summaries and the dashboard:** there's no separate language team; it's non-blocking backend-style work that builds on the caption log Platform already moves around.
 - **OpenAI only as an offline benchmark:** the target is free on-device Apple Foundation Models, and an API key must never ship in the app.
 
 ---
@@ -473,7 +491,7 @@ If the device is overloaded, degrade in this order:
 
 - Does iOS Club have an Apple Developer team account Graption can use?
 - PACE access status, and the AVA download status.
-- Language-team feature scope (the current proposal is a post-session "catch me up" summary).
+- Dashboard scope: summaries, notes, or both? How long are past meetings kept on-device?
 - Oldest iPhone on the team (for performance benchmarks), and which team devices support Apple Intelligence (for Foundation Models).
 - Budget approval outcome.
 
