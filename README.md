@@ -17,7 +17,7 @@ from a small server (a Mac on the same Wi-Fi, or optionally the cloud).
 
 | Folder | What | Team |
 |---|---|---|
-| `apps/ios/` | iOS app (not created yet; plan in its README) | all four |
+| `apps/ios/` | iOS app (blank SwiftUI app for now; setup in its README) | all four |
 | `ml/common/`, `ml/asd/` | feature spec + speaker detection model | Vision |
 | `ml/tone/` | tone model | Audio |
 | `server/` | tone server (FastAPI + WebSocket) | Platform (Audio plugs in the model) |
@@ -36,7 +36,11 @@ uv run pytest            # 3. check it works
 cp .env.example .env     # 4. only if you need secrets/config; never commit .env
 ```
 
-iOS work needs a Mac with Xcode. Coding agents: see [`CLAUDE.md`](CLAUDE.md).
+**iOS (Mac + Xcode):** follow [`apps/ios/README.md`](apps/ios/README.md): copy
+`apps/ios/Config/Local.xcconfig.example` to `Local.xcconfig`, fill in your Apple team ID, open
+`apps/ios/Graption.xcodeproj`, press ⌘R.
+
+Coding agents: see [`CLAUDE.md`](CLAUDE.md).
 
 ## Rules
 - Branch → PR to `main`; CI (lint + tests) must pass.

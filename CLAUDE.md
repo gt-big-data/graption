@@ -39,7 +39,13 @@ uv run ruff check .                            # lint (CI)
 uv run pytest                                  # tests (CI)
 uv add --package graption-server <pkg>         # add a dep to one member (server | ml | language)
 cd server && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000   # once server/app/main.py exists
+
+# iOS (macOS + Xcode): must print ** BUILD SUCCEEDED **
+xcodebuild -project apps/ios/Graption.xcodeproj -scheme Graption \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
+Never put a `DEVELOPMENT_TEAM` or bundle ID in `project.pbxproj`; signing comes from
+`apps/ios/Config/Local.xcconfig` (gitignored).
 
 ## Teams and where they work
 | Team | Python | iOS (`apps/ios/Packages/`, planned) |

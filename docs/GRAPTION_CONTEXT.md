@@ -109,7 +109,9 @@ Long-term, the tone model moves on-device (Core ML), which removes the server en
 ```
 graption/
 ├── apps/ios/
+│   ├── Graption.xcodeproj    # committed Xcode project (no generator)
 │   ├── Graption/             # thin app target: entry point + wiring only
+│   ├── Config/               # Base.xcconfig (shared) + Local.xcconfig (gitignored: team ID, secrets)
 │   └── Packages/             # local Swift packages (see section 14)
 │       ├── GraptionCore/     # generated event types, protocols, mocks, runtime model loader
 │       ├── GraptionVision/   # camera capture, MediaPipe wrapper, FaceTracker, FeatureBuilder, SpeakerModel
@@ -439,7 +441,7 @@ If the device is overloaded, degrade in this order:
 - **One monorepo, two toolchains:**
   - `apps/ios/` uses **Xcode** (build, sign, run on device, Instruments). Mac required.
   - `server/`, `ml/`, and `language/` use any IDE (VS Code, Cursor, PyCharm) on any OS. Training runs on PACE.
-- **Thin Xcode project:**
+- **Thin Xcode project** (committed as-is, no XcodeGen; Xcode 16+ synchronized folders mean adding files doesn't touch `.pbxproj`):
   - Put almost all Swift in local Swift packages (`apps/ios/Packages/GraptionCore`, `GraptionVision`, `GraptionAudio`, …).
   - The app target only wires up UI. This avoids `.pbxproj` merge conflicts and lets `swift test` run in CI.
 - **Python:** a `uv` workspace at the root. `server/`, `ml/`, and `language/` are members, each with its own `pyproject.toml`. Torch and MediaPipe stay out of the server's dependencies.
@@ -482,6 +484,7 @@ If the device is overloaded, degrade in this order:
 - **CREMA-D, not MSP-Podcast; openSMILE dropped:** no license paperwork. The audEERING baseline (trained on MSP-Podcast) gives natural-speech coverage for free. Both remain stretch goals, used only if tests show gaps.
 - **Tone never blocks captions,** and tone tags only show when confident. A wrong tag is worse than none for DHH users.
 - **Rule-based fusion before learned fusion:** it produces the logged data a learned version would need.
+- **Committed `.xcodeproj`, not XcodeGen:** synchronized folders plus per-team Swift packages already avoid most merge conflicts, and it saves every teammate a tool install. Signing is per developer via a gitignored `Local.xcconfig`, because free Apple IDs can't share a bundle ID.
 - **Platform owns summaries and the dashboard:** there's no separate language team; it's non-blocking backend-style work that builds on the caption log Platform already moves around.
 - **OpenAI only as an offline benchmark:** the target is free on-device Apple Foundation Models, and an API key must never ship in the app.
 

@@ -23,4 +23,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pytest
 
-  # TODO: add a macOS `swift test` job (path-filtered to apps/ios/**) once the iOS packages exist.
+  # TODO: add a macOS job (own workflow, path-filtered to apps/ios/**; macOS minutes are expensive):
+  #   xcodebuild -project apps/ios/Graption.xcodeproj -scheme Graption \
+  #     -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+  #   plus `swift test` in each apps/ios/Packages/* once packages exist.
