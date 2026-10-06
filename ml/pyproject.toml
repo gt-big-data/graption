@@ -5,7 +5,12 @@ description = "Graption training code: speaker detection (asd), tone, shared fea
 requires-python = ">=3.11"
 # Heavy deps (torch, mediapipe, coremltools, wandb, transformers) get added as an optional
 # extra when training code lands, so `uv sync` stays light for server/CI.
-dependencies = []
+dependencies = [
+    "scipy>=1.17.1",
+    "soundfile>=0.14.0",
+    "torch>=2.14.1",
+    "transformers>=5.18.0",
+]
 
 [build-system]
 requires = ["hatchling"]
