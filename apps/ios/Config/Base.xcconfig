@@ -6,3 +6,5 @@ DEV_SUFFIX = dev
 PRODUCT_BUNDLE_IDENTIFIER = edu.gatech.graption.$(DEV_SUFFIX)
 
 #include? "Local.xcconfig"
+
+INFOPLIST_KEY_NSMicrophoneUsageDescription = Graption uses your microphone to detect speech and provide live captions.
