@@ -287,6 +287,12 @@ for caption [t0, t1]:
 
 ## 7. Mac tone server spec
 
+- **Skeleton implemented:** `GET /health` returns plain text `ok`. The session endpoint
+  replies to each schema-v1.0 `tone_request` with a matching `tone_result`, `tag: null`,
+  zero probabilities (no prediction), and `model_version: "tone-stub-v1"` through
+  `MockToneBackend`. `caption_log` is accepted and discarded until logging is implemented.
+  Audio stays in memory only. Real inference, SQLite logging, and deployment packaging
+  remain later work; the skeleton always uses the stub regardless of `TONE_BACKEND`.
 - **Run (Mac):** `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - **Run (tunnel):** also run `cloudflared tunnel --url http://localhost:8000`, which gives a free `wss://…trycloudflare.com` URL.
 - **Run (cloud):** build `server/Dockerfile` and deploy to Cloud Run.
