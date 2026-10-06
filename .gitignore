@@ -13,6 +13,7 @@ service-account*.json
 data/
 datasets/
 wandb/
+/logs/
 *.npz
 *.npy
 *.pt

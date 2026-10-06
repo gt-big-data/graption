@@ -11,7 +11,7 @@ SCHEMA_PATH = Path(__file__).resolve().parents[1] / "events.schema.json"
 SCHEMA = json.loads(SCHEMA_PATH.read_text())
 VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
 
-BASE = {"session_id": "s-test", "schema_version": "1.0"}
+BASE = {"session_id": "s-test", "schema_version": "1.1"}
 CAPTION_ID = "3f1c2a9e-8b7d-4c6e-9a01-2b3c4d5e6f70"
 
 CAPTION = {
@@ -52,6 +52,15 @@ EXAMPLES = {
     },
     "caption_log": {**BASE, "type": "caption_log", "caption": CAPTION, "tone_tag": "excited"},
     "caption_log_no_tone": {**BASE, "type": "caption_log", "caption": CAPTION, "tone_tag": None},
+    "session_error": {
+        **BASE,
+        "type": "session_error",
+        "code": "invalid_json",
+        "message": "Invalid JSON at line 1, column 1: Expecting value",
+        "request": "not json",
+        "request_encoding": "text",
+        "model_version": "tone-stub-v1",
+    },
     "tone_result": {
         **BASE,
         "type": "tone_result",
@@ -98,6 +107,9 @@ def _broken(name, mutate):
         _broken("speaker_scores", lambda e: e["faces"][0].update(bbox=[0, 0, 1])),
         _broken("tone_result", lambda e: e["probs"].pop("sad")),
         _broken("tone_request", lambda e: e.update(extra_field=1)),
+        _broken("session_error", lambda e: e.pop("request")),
+        _broken("session_error", lambda e: e.update(request_encoding="unknown")),
+        _broken("tone_request", lambda e: e.update(schema_version="1.0")),
         {**BASE, "type": "not_an_event"},
     ],
 )
