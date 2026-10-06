@@ -29,7 +29,7 @@ def tone_request():
     return {
         "type": "tone_request",
         "session_id": "test-session",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "caption_id": str(uuid4()),
         "t_start": 1.0,
         "t_end": 1.1,
@@ -67,12 +67,12 @@ def test_caption_log_does_not_interrupt_tone(client):
     caption_log = {
         "type": "caption_log",
         "session_id": request["session_id"],
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "tone_tag": None,
         "caption": {
             "type": "caption",
             "session_id": request["session_id"],
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "caption_id": request["caption_id"],
             "t_start": 1.0,
             "t_end": 1.1,
@@ -88,32 +88,106 @@ def test_caption_log_does_not_interrupt_tone(client):
 
 
 @pytest.mark.parametrize(
-    "changes",
+    ("changes", "reason"),
     [
-        {"session_id": "another-session"},
-        {"schema_version": "2.0"},
-        {"audio_b64": "invalid base64!"},
-        {"audio_b64": "AA=="},
-        {"t_end": 0.5},
-        {"caption_id": "not-a-uuid"},
-        {"type": "unknown"},
+        ({"session_id": "another-session"}, "session_mismatch"),
+        ({"schema_version": "2.0"}, "schema_validation_failed"),
+        ({"audio_b64": "invalid base64!"}, "invalid_base64_audio"),
+        ({"audio_b64": "AA=="}, "invalid_pcm16_length"),
+        ({"t_end": 0.5}, "invalid_segment_times"),
+        ({"caption_id": "not-a-uuid"}, "schema_validation_failed"),
+        ({"type": "unknown"}, "unsupported_event"),
+        ({"private_marker": "private-payload-do-not-log"}, "schema_validation_failed"),
     ],
 )
-def test_invalid_events_close_without_echoing_audio(client, changes):
+def test_invalid_events_reply_and_allow_recovery(client, changes, reason, caplog):
+    request = {**tone_request(), **changes}
     with client.websocket_connect("/ws/session?session_id=test-session") as websocket:
-        websocket.send_json({**tone_request(), **changes})
-        with pytest.raises(WebSocketDisconnect) as error:
-            websocket.receive_json()
-        assert error.value.code == 1008
-        assert error.value.reason == "Invalid session event"
+        raw = json.dumps(request)
+        websocket.send_text(raw)
+        response = websocket.receive_json()
+        VALIDATOR.validate(response)
+        assert response["type"] == "session_error"
+        assert response["code"] == reason
+        assert response["message"]
+        assert response["request"] == raw
+        assert response["request_encoding"] == "text"
+        assert response["session_id"] == "test-session"
+        valid = tone_request()
+        websocket.send_json(valid)
+        assert websocket.receive_json()["caption_id"] == valid["caption_id"]
+    assert f"Rejected WebSocket request: reason={reason}" in caplog.text
+    assert "model_version=tone-stub-v1" in caplog.text
+    assert request["audio_b64"] not in caplog.text
+    assert "private-payload-do-not-log" not in caplog.text
 
 
-def test_malformed_json_closes_cleanly(client):
+@pytest.mark.parametrize("raw", ["not json", '{"type":', "[]", "null", '{"x": NaN}'])
+def test_malformed_json_allows_recovery(client, caplog, raw):
     with client.websocket_connect("/ws/session?session_id=test-session") as websocket:
-        websocket.send_text("not json")
-        with pytest.raises(WebSocketDisconnect) as error:
-            websocket.receive_json()
-        assert error.value.code == 1008
+        websocket.send_text(raw)
+        response = websocket.receive_json()
+        VALIDATOR.validate(response)
+        assert response["type"] == "session_error"
+        assert response["request"] == raw
+        assert response["message"]
+        websocket.send_json(tone_request())
+        assert websocket.receive_json()["tag"] is None
+    assert raw not in caplog.text
+
+
+def test_missing_field_error_identifies_field_and_allows_recovery(client):
+    request = tone_request()
+    del request["sample_rate"]
+    with client.websocket_connect("/ws/session?session_id=test-session") as websocket:
+        websocket.send_json(request)
+        response = websocket.receive_json()
+        assert response["code"] == "schema_validation_failed"
+        assert "sample_rate: Field required" in response["message"]
+        assert json.loads(response["request"]) == request
+        websocket.send_json(tone_request())
+        assert websocket.receive_json()["tag"] is None
+
+
+@pytest.mark.parametrize("received", ["Test-session", "test-session ", "test-session\u200b"])
+def test_session_mismatch_exposes_exact_values_without_logging_them(client, caplog, received):
+    with client.websocket_connect("/ws/session?session_id=test-session") as websocket:
+        websocket.send_json({**tone_request(), "session_id": received})
+        response = websocket.receive_json()
+        assert response["code"] == "session_mismatch"
+        assert "Expected 'test-session' (12 characters)" in response["message"]
+        assert f"received {ascii(received)} ({len(received)} characters)" in response["message"]
+        websocket.send_json(tone_request())
+        assert websocket.receive_json()["tag"] is None
+    assert received not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("url_id", "request_id", "expected_code"),
+    [("demo%2Bphone", "demo+phone", "tone_result"), ("demo+phone", "demo+phone", "session_error")],
+)
+def test_session_ids_use_decoded_url_query(client, url_id, request_id, expected_code):
+    with client.websocket_connect(f"/ws/session?session_id={url_id}") as websocket:
+        websocket.send_json({**tone_request(), "session_id": request_id})
+        response = websocket.receive_json()
+        assert response["type"] == expected_code
+        if expected_code == "session_error":
+            assert "Expected 'demo phone'" in response["message"]
+            assert "received 'demo+phone'" in response["message"]
+
+
+def test_binary_frame_is_echoed_as_base64_and_allows_recovery(client, caplog):
+    with client.websocket_connect("/ws/session?session_id=test-session") as websocket:
+        websocket.send_bytes(b"private audio")
+        response = websocket.receive_json()
+        VALIDATOR.validate(response)
+        assert response["code"] == "expected_json_text_frame"
+        assert response["request_encoding"] == "base64"
+        assert response["request"] == "cHJpdmF0ZSBhdWRpbw=="
+        websocket.send_json(tone_request())
+        assert websocket.receive_json()["tag"] is None
+    assert "private audio" not in caplog.text
+    assert response["request"] not in caplog.text
 
 
 @pytest.mark.parametrize("authorization", [None, "Bearer wrong-token"])

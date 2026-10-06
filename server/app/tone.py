@@ -12,16 +12,20 @@ class TonePrediction:
 
 
 class ToneBackend(Protocol):
+    model_version: str
+
     async def predict(self, audio: bytes, sample_rate: int) -> TonePrediction:
         """Infer from PCM16 mono little-endian audio without persisting it."""
         ...
 
 
 class MockToneBackend:
+    model_version = "tone-stub-v1"
+
     async def predict(self, audio: bytes, sample_rate: int) -> TonePrediction:
         # Zero probabilities signal that this stub made no prediction.
         return TonePrediction(
             tag=None,
             probs=dict.fromkeys(("anger", "disgust", "fear", "happy", "neutral", "sad"), 0.0),
-            model_version="tone-stub-v1",
+            model_version=self.model_version,
         )

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -10,8 +11,13 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 from typing_extensions import TypeAliasType
 
 
-class SchemaVersion(RootModel[Literal["1.0"]]):
-    root: Literal["1.0"]
+class SchemaVersion(RootModel[Literal["1.1"]]):
+    root: Literal["1.1"]
+
+
+class RequestEncoding(Enum):
+    text = "text"
+    base64 = "base64"
 
 
 class SessionId(RootModel[str]):
@@ -175,13 +181,34 @@ class ToneResult(BaseModel):
     latency_ms: LatencyMs
 
 
+class SessionError(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    type: Literal["session_error"]
+    session_id: SessionId
+    schema_version: SchemaVersion
+    code: str
+    message: str
+    request: Annotated[
+        str,
+        Field(
+            description="Exact received text, or base64 for an unsupported binary frame. May contain audio: never store or log."
+        ),
+    ]
+    request_encoding: RequestEncoding
+    model_version: str
+
+
 class GraptionEvent(
-    RootModel[SpeakerScores | Caption | SoundEvent | ToneRequest | CaptionLog | ToneResult]
+    RootModel[
+        SpeakerScores | Caption | SoundEvent | ToneRequest | CaptionLog | ToneResult | SessionError
+    ]
 ):
     root: Annotated[
-        SpeakerScores | Caption | SoundEvent | ToneRequest | CaptionLog | ToneResult,
+        SpeakerScores | Caption | SoundEvent | ToneRequest | CaptionLog | ToneResult | SessionError,
         Field(
-            description="Graption event contract v1.0 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds since session start on the phone's monotonic host clock. Changing this file = bump schema_version and regenerate Pydantic + Swift types.",
+            description="Graption event contract v1.1 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds since session start on the phone's monotonic host clock. Changing this file = bump schema_version and regenerate Pydantic + Swift types.",
             title="GraptionEvent",
         ),
     ]

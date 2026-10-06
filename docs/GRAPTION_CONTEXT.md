@@ -153,7 +153,7 @@ The repo starts with only READMEs in most folders; each team creates the files a
 All timestamps are **seconds since session start, measured on the phone's monotonic host clock**. Convert camera and audio `CMSampleBuffer` presentation timestamps to host time. The Mac never generates timestamps used for alignment.
 
 ### Event schema (`schemas/events.schema.json`)
-Every event includes `type`, `session_id`, and `schema_version` (start at `"1.0"`).
+Every event includes `type`, `session_id`, and `schema_version` (currently `"1.1"`).
 
 **On-device (Swift types, generated from the schema):**
 ```jsonc
@@ -186,6 +186,27 @@ Every event includes `type`, `session_id`, and `schema_version` (start at `"1.0"
   "probs":{"anger":0.05,"disgust":0.02,"fear":0.03,"happy":0.72,"neutral":0.15,"sad":0.03},
   "model_version":"tone-head-v2", "latency_ms":{"recv_to_send":180} }
 ```
+
+**Malformed request → client (schema v1.1):**
+```json
+{
+  "type": "session_error",
+  "session_id": "demo",
+  "schema_version": "1.1",
+  "code": "invalid_json",
+  "message": "Invalid JSON at line 1, column 1: Expecting value",
+  "request": "not json",
+  "request_encoding": "text",
+  "model_version": "tone-stub-v1"
+}
+```
+The connection stays open after request errors, so the client can correct and resend.
+`request` is the exact received text, including any audio supplied; unsupported binary
+frames are echoed as base64 with `request_encoding: "base64"`. These replies are sent
+only to the originating client and must never enter server logs or storage. Authentication
+failures still reject the handshake. Version 1.1 adds `session_error`; clients must use
+`schema_version: "1.1"` in all events. Pydantic types live in `server/app/events.py` and
+Swift types in `schemas/generated/Events.swift` (not wired into the iOS app yet).
 
 Base64 JSON is fine for the MVP (~130 KB for a 3s segment). Binary frames are a later optimization.
 
@@ -288,11 +309,14 @@ for caption [t0, t1]:
 ## 7. Mac tone server spec
 
 - **Skeleton implemented:** `GET /health` returns plain text `ok`. The session endpoint
-  replies to each schema-v1.0 `tone_request` with a matching `tone_result`, `tag: null`,
+  replies to each schema-v1.1 `tone_request` with a matching `tone_result`, `tag: null`,
   zero probabilities (no prediction), and `model_version: "tone-stub-v1"` through
   `MockToneBackend`. `caption_log` is accepted and discarded until logging is implemented.
   Audio stays in memory only. Real inference, SQLite logging, and deployment packaging
   remain later work; the skeleton always uses the stub regardless of `TONE_BACKEND`.
+  Invalid session messages return `session_error` and keep the connection open. Console
+  warnings contain only a fixed rejection code and backend model version. The response
+  echoes the received request to its originating client; it is never stored or logged.
 - **Run (Mac):** `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - **Run (tunnel):** also run `cloudflared tunnel --url http://localhost:8000`, which gives a free `wss://…trycloudflare.com` URL.
 - **Run (cloud):** build `server/Dockerfile` and deploy to Cloud Run.
@@ -489,6 +513,7 @@ If the device is overloaded, degrade in this order:
 - **Face only in v1:** multi-person pose and hands would overload the phone and add little for "who's talking."
 - **CREMA-D, not MSP-Podcast; openSMILE dropped:** no license paperwork. The audEERING baseline (trained on MSP-Podcast) gives natural-speech coverage for free. Both remain stretch goals, used only if tests show gaps.
 - **Tone never blocks captions,** and tone tags only show when confident. A wrong tag is worse than none for DHH users.
+- **Recoverable request errors (schema v1.1):** return descriptive `session_error` messages with the received request so manual clients can correct mistakes without reconnecting. Never log or store the echoed payload.
 - **Rule-based fusion before learned fusion:** it produces the logged data a learned version would need.
 - **Committed `.xcodeproj`, not XcodeGen:** synchronized folders plus per-team Swift packages already avoid most merge conflicts, and it saves every teammate a tool install. Signing is per developer via a gitignored `Local.xcconfig`, because free Apple IDs can't share a bundle ID.
 - **Platform owns summaries and the dashboard:** there's no separate language team; it's non-blocking backend-style work that builds on the caption log Platform already moves around.

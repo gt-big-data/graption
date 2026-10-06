@@ -41,6 +41,7 @@ known-first-party = ["app"]
 
 [tool.pytest.ini_options]
 testpaths = ["schemas", "server", "ml", "language"]
+pythonpath = ["server"]
 addopts = "--import-mode=importlib"
 
 [tool.ruff.lint.flake8-bugbear]
