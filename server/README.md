@@ -65,9 +65,8 @@ counts. The values must match exactly (including case and spaces). Use `?session
 with `"session_id": "demo"` to start. Reconnect after changing the URL in a client app.
 Query strings decode `+` as a space; encode a literal plus as `%2B`.
 
-The server prints only a fixed rejection code and backend model version. Request contents,
-audio, and validation exception details are never logged or stored. Error replies echo
-payloads only to the client that sent them.
+Request contents, audio, authorization headers, and validation exception details are
+never logged or stored. Error replies echo payloads only to the client that sent them.
 
 `app/tone.py` defines `ToneBackend` and `MockToneBackend`. The server currently always
 uses the mock; Audio can plug in inference later. No audio is written to disk or logs.
@@ -77,6 +76,43 @@ Export `TONE_TOKEN` to require `Authorization: Bearer <token>` on the handshake.
 Export `DEPLOY_MODE=tunnel` or `cloud` to require a configured token as well.
 These environment variables are read from the process; to load a local `.env` file,
 pass uvicorn's `--env-file <path>` option. Hosting and real inference are later work.
+
+## Verbose logs and metrics
+
+Enable application diagnostics from the repo root:
+
+```bash
+uv run --directory server python -m app --verbose
+```
+
+The launcher defaults to `--host 0.0.0.0 --port 8000`; both can be overridden.
+From `server/`, run `uv run python -m app --verbose`. Omit `--verbose` for normal logging.
+
+Logs appear in the terminal and in a **new repo-root `logs/server-<UTC-timestamp>-<unique-id>.jsonl`**
+file on every server start, regardless of whether you start from the root or `server/`.
+`logs/` is gitignored and created on startup. The startup log prints the current file path.
+Each run's file rotates at 5 MiB with three backups (`<filename>.1` through `.3`);
+previous runs remain available and are never appended to or overwritten.
+Override the directory with `TONE_LOG_DIR=/path/to/logs` if needed. Without `--verbose`,
+only startup/shutdown and warnings/errors are recorded; verbose mode adds:
+
+- Connection open/close events, duration, and close code.
+- Received frame types and byte counts; accepted tone requests and caption logs.
+- Validated caption IDs, sample rates, segment durations, and decoded audio byte counts.
+- Inference, send, and receive-to-send timings in milliseconds.
+- Per-connection totals for received messages, accepted/rejected requests, bytes, and timings.
+
+Each entry includes a UTC diagnostic timestamp, level, event, and model version.
+A generated `connection_id` links entries without logging caller-provided session IDs.
+These are application diagnostics; uvicorn's own access/startup messages remain console-only.
+Use `--verbose` for payload-free diagnostics; uvicorn's `--log-level debug` can expose
+raw WebSocket frames and should not be used with audio.
+
+To follow the file from the repo root:
+
+```bash
+tail -f "$(ls -t logs/server-*.jsonl | head -1)"
+```
 
 ## Verify and regenerate
 
@@ -99,17 +135,6 @@ uv run datamodel-codegen \
   --use-union-operator --use-default-kwarg --use-title-as-name --use-annotated \
   --formatters ruff-check ruff-format
 ```
-
-Swift types are generated into `schemas/generated/Events.swift` (the iOS app does not yet
-consume them). Regenerate with:
-
-```bash
-npx --yes quicktype --src schemas/events.schema.json --src-lang schema \
-  --lang swift --top-level GraptionEvent --out schemas/generated/Events.swift
-```
-
-Schema v1.1 adds `session_error`; update all client messages to `schema_version: "1.1"`.
-Schema changes affect other teams: tag the lead when opening the PR.
 
 Later: tag mapping, SQLite logging, and Docker packaging. Add server dependencies with
 `uv add --package graption-server <pkg>`; tests live in `server/tests/`.

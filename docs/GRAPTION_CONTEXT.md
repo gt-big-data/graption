@@ -314,10 +314,13 @@ for caption [t0, t1]:
   `MockToneBackend`. `caption_log` is accepted and discarded until logging is implemented.
   Audio stays in memory only. Real inference, SQLite logging, and deployment packaging
   remain later work; the skeleton always uses the stub regardless of `TONE_BACKEND`.
-  Invalid session messages return `session_error` and keep the connection open. Console
-  warnings contain only a fixed rejection code and backend model version. The response
+  Invalid session messages return `session_error` and keep the connection open. Rejection
+  warnings contain only a fixed rejection code, generated connection ID, and backend model version. The response
   echoes the received request to its originating client; it is never stored or logged.
 - **Run (Mac):** `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- **Run (verbose, repo root):** `uv run --directory server python -m app --verbose`.
+  The launcher defaults to `--host 0.0.0.0 --port 8000`; either option can be overridden.
+  `--verbose` enables application diagnostics while leaving uvicorn frame logging at INFO.
 - **Run (tunnel):** also run `cloudflared tunnel --url http://localhost:8000`, which gives a free `wss://…trycloudflare.com` URL.
 - **Run (cloud):** build `server/Dockerfile` and deploy to Cloud Run.
   - CPU only, 2 vCPU / 4 GB, min instances 0 (scales to zero between sessions, which keeps credit use low).
@@ -336,12 +339,20 @@ for caption [t0, t1]:
   - arousal > 0.65 and valence < 0.4 → `upset`
   - arousal < 0.3 → `calm`
   - otherwise `null`
-- **Config (env vars):** `TONE_BACKEND` (`audeering` | `custom`), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only).
+- **Config (env vars):** `TONE_BACKEND` (`audeering` | `custom`), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only), `TONE_LOG_DIR` (default repo-root `logs/`).
 - **CPU performance:** the audEERING baseline is the large wav2vec2 variant (~165M params) and may be slow on CPU. Benchmark per-sentence latency on Cloud Run before user testing. If it's over ~1s, use the custom WavLM-base head in cloud mode.
 - **SQLite tables:** `sessions`, `captions` (from `caption_log`), `tone_results` (probs, model_version, latency).
   - Cloud Run disks are ephemeral, so in cloud mode, export the SQLite file to `LOG_EXPORT_BUCKET` at session end.
 - **Privacy:** never write request audio to disk or logs in any mode. Only text, tags, probabilities, and timings are stored.
-- **Logging:** per-request receive, inference, and send timings.
+- **Logging:** application logs go to the console and a fresh gitignored repo-root
+  `logs/server-<UTC-timestamp>-<unique-id>.jsonl` on each server start; the startup log prints
+  the file path. Each run rotates at 5 MiB with three backups; previous runs are preserved. Startup/shutdown and warnings/errors are always logged.
+  `--verbose` adds connection lifecycle, accepted tone/caption requests, frame/audio byte
+  counts, receive-to-send/inference/send timings, and per-connection totals on disconnect.
+  Entries include model versions and generated connection IDs. Never log raw frames,
+  caller-provided session IDs, caption text, tokens, echoed requests, or exception details.
+  UTC log timestamps are diagnostics only; alignment timestamps still come from the phone.
+  Use the application verbose flag rather than uvicorn debug frame logging, which can expose audio.
 - **Campus Wi-Fi** often blocks device-to-device traffic. Use a phone hotspot or a personal router.
 
 ---

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator, FormatChecker
 from starlette.websockets import WebSocketDisconnect
 
-from app.main import app
+from app.main import app, create_app
 
 SCHEMA = json.loads(
     (Path(__file__).resolve().parents[2] / "schemas/events.schema.json").read_text()
@@ -18,8 +18,9 @@ VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     monkeypatch.setenv("DEPLOY_MODE", "local")
+    monkeypatch.setenv("TONE_LOG_DIR", str(tmp_path / "logs"))
     monkeypatch.delenv("TONE_TOKEN", raising=False)
     with TestClient(app) as client:
         yield client
@@ -216,3 +217,78 @@ def test_nonlocal_mode_requires_token(client, monkeypatch, mode):
         with client.websocket_connect("/ws/session?session_id=test-session"):
             pass
     assert error.value.code == 1008
+
+
+@pytest.mark.parametrize("verbose", ["false", "true"])
+def test_log_files_verbose_metrics_and_payload_privacy(monkeypatch, tmp_path, caplog, verbose):
+    monkeypatch.setenv("DEPLOY_MODE", "local")
+    monkeypatch.delenv("TONE_TOKEN", raising=False)
+    monkeypatch.setenv("TONE_LOG_DIR", str(tmp_path / "logs"))
+    raw = json.dumps({**tone_request(), "private_marker": "never-save-this-request"})
+    with TestClient(create_app(verbose=verbose == "true")) as client:
+        with client.websocket_connect("/ws/session?session_id=test-session") as websocket:
+            request = tone_request()
+            for _ in range(2):
+                websocket.send_json(request)
+                assert websocket.receive_json()["tag"] is None
+            websocket.send_text(raw)
+            assert websocket.receive_json()["request"] == raw
+    content = next((tmp_path / "logs").glob("server-*.jsonl")).read_text()
+    logs = [json.loads(line) for line in content.splitlines()]
+    events = [entry["event"] for entry in logs]
+    assert events.count("server_started") == 1
+    assert events.count("server_stopped") == 1
+    assert events.count("request_rejected") == 1
+    assert all(entry["model_version"] == "tone-stub-v1" for entry in logs)
+    for sensitive in [request["audio_b64"], "never-save-this-request", raw]:
+        assert sensitive not in content
+        assert sensitive not in caplog.text
+    if verbose == "true":
+        assert events.count("tone_request_valid") == 2
+        assert events.count("tone_result_sent") == 2
+        summary = next(entry for entry in logs if entry["event"] == "connection_closed")
+        assert summary["received_messages"] == 3
+        assert summary["tone_requests"] == 2
+        assert summary["rejected_requests"] == 1
+        assert summary["bytes_received"] > 0
+        assert summary["bytes_sent"] > 0
+        assert summary["inference_ms"] >= 0
+        assert summary["send_ms"] >= 0
+        assert summary["close_code"] == 1000
+        connection_events = [entry for entry in logs if "connection_id" in entry]
+        assert len({entry["connection_id"] for entry in connection_events}) == 1
+    else:
+        assert "tone_request_valid" not in events
+        assert "connection_closed" not in events
+
+
+def test_backend_failure_does_not_log_exception_payload(client, monkeypatch, tmp_path, caplog):
+    class BrokenBackend:
+        model_version = "broken-test-v1"
+
+        async def predict(self, audio, sample_rate):
+            raise RuntimeError("secret-audio-content-do-not-log")
+
+    monkeypatch.setattr(app.state, "tone_backend", BrokenBackend())
+    with client.websocket_connect("/ws/session?session_id=test-session") as websocket:
+        websocket.send_json(tone_request())
+        with pytest.raises(WebSocketDisconnect) as error:
+            websocket.receive_json()
+        assert error.value.code == 1011
+    content = next((tmp_path / "logs").glob("server-*.jsonl")).read_text()
+    assert "connection_failed" in content
+    assert "broken-test-v1" in content
+    assert "secret-audio-content-do-not-log" not in content + caplog.text
+
+
+def test_each_server_start_creates_a_new_log_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("TONE_LOG_DIR", str(tmp_path))
+    for _ in range(2):
+        with TestClient(create_app()) as client:
+            assert client.get("/health").text == "ok"
+    files = list(tmp_path.glob("server-*.jsonl"))
+    assert len(files) == 2
+    for path in files:
+        entries = [json.loads(line) for line in path.read_text().splitlines()]
+        assert [entry["event"] for entry in entries] == ["server_started", "server_stopped"]
+        assert entries[0]["log_file"] == str(path)
