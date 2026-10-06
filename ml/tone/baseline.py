@@ -1,15 +1,19 @@
 #allows me to measure processing time per audio clip
+#pathlib finds all the audio files within test_audio
+#soundfile loads in the audio files + allows for deterministric qualities
+#pytorch imports Pytorch, ML framework for audEERING model
+#torch.nn neural-network components
+#scipy.signal resamples audio from 48,000 Hz to 16,000 Hz
+#prepares raw audio for NN
+
 import time
-from pathlib import Path #finds all the audio files within test_audio
+from pathlib import Path
 
-#imports Pytorch, ML framework for audEERING model
+import soundfile as sf
 import torch
-import torch.nn as nn #neural-network components
-import soundfile as sf #loads in the audio files + allows for deterministric qualities
-
-from scipy.signal import resample_poly #resamples audio from 48,000 Hz to 16,000 Hz
-from transformers import Wav2Vec2Processor #prepares raw audio for NN
-#underlying Wav2Vec2 model + functionality
+import torch.nn as nn
+from scipy.signal import resample_poly
+from transformers import Wav2Vec2Processor
 from transformers.models.wav2vec2.modeling_wav2vec2 import (
     Wav2Vec2Model,
     Wav2Vec2PreTrainedModel,
@@ -37,7 +41,9 @@ class RegressionHead(nn.Module):
         x = self.dropout(features)
         #pass the features through Linear Layer #1
         x = self.dense(x)
-        #tanh activation function (used because it matches the architecture from the pretrained audEEERING model which had trained the weights we are using)
+        #tanh activation function
+        #This recreates the architecture from the pretrained audEERING model,
+        # #which provides the weights used by this implementation
         x = torch.tanh(x)
         #dropout applied again before the Final Linear Layer
         x = self.dropout(x)
@@ -69,7 +75,7 @@ class EmotionModel(Wav2Vec2PreTrainedModel):
 #Load in the audio processor using locally available files <-- raw audio
 processor = Wav2Vec2Processor.from_pretrained(
     MODEL_NAME,
-    local_files_only =True, #prevents Transformers from connecting to Hugging Face which results in error
+    local_files_only=True, #prevents Transformers from connecting to Hugging Face
 )
 
 #Load in the pretrained audEERING model from the local cache
@@ -123,7 +129,7 @@ def extract_tag(audio_file):
     #use first part of filename as the intended category
     #this is bc filenames are organized as calm_clip_one.mp3
     filename = Path(audio_file).name
-    return filename.split("_")[0]  # Assuming the category is the first part of the filename separated by underscores
+    return filename.split("_")[0]  #category first part of the filename
 
 #function that runs the model on one clip and measures its infernece time
 def analyze_clip(audio_file):
