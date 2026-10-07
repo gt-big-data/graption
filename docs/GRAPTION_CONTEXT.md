@@ -245,6 +245,8 @@ for caption [t0, t1]:
 - Filter to an allowlist: doorbell, knock, smoke/fire alarm, siren, dog bark, baby cry, laughter, phone ring.
 - Confidence ≥ 0.7, with a 3s cooldown per label.
 - Verify the exact label strings from `knownClassifications`.
+  The verified mapping (Apple identifier → alert label) lives in `SoundAlertFilter.labels`, and a test checks it.
+- Window 1 s with 50% overlap (Apple's default is 3 s, too slow for the ≤ 1 s alert lag target).
 
 **ToneClient**
 - Sends a `tone_request` per segment and receives `tone_result`.
