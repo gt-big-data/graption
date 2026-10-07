@@ -8,7 +8,9 @@ on:
 
 jobs:
   ios:
-    runs-on: macos-latest
+  # Use Xcode 27 instead of macos-latest because Graption's Xcode project
+  # uses a newer project format that Xcode 26.6 cannot open.
+    runs-on: xcode-27
 
     steps:
       - name: Checkout repository
@@ -22,3 +24,5 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+#mac-os latest or xcode-27 for the mac server to host and run the Github Actions Server on?
