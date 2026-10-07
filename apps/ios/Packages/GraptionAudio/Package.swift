@@ -20,8 +20,14 @@ let package = Package(
             targets: ["GraptionAudio"]
         )
     ],
+    dependencies: [
+        .package(url: "https://github.com/argmaxinc/WhisperKit.git", exact: "0.9.4")
+    ],
     targets: [
-        .target(name: "GraptionAudio"),
+        .target(
+            name: "GraptionAudio",
+            dependencies: [.product(name: "WhisperKit", package: "WhisperKit")]
+        ),
         .testTarget(
             name: "GraptionAudioTests",
             dependencies: ["GraptionAudio"]
