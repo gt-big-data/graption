@@ -1,0 +1,28 @@
+name: iOS CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/ios/**"
+      - ".github/workflows/ios-ci.yml"
+
+jobs:
+  ios:
+  # Use Xcode 27 instead of macos-latest because Graption's Xcode project
+  # uses a newer project format that Xcode 26.6 cannot open.
+    runs-on: xcode-27
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Graption iOS app
+        run: |
+          xcodebuild \
+            -project apps/ios/Graption.xcodeproj \
+            -scheme Graption \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+#mac-os latest or xcode-27 for the mac server to host and run the Github Actions Server on?
