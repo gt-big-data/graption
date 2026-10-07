@@ -1,0 +1,24 @@
+name: iOS CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/ios/**"
+      - ".github/workflows/ios-ci.yml"
+
+jobs:
+  ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Graption iOS app
+        run: |
+          xcodebuild \
+            -project apps/ios/Graption.xcodeproj \
+            -scheme Graption \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
