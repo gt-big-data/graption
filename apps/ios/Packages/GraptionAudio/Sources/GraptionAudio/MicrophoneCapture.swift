@@ -24,6 +24,15 @@ public final class MicrophoneCapture {
         self.vad = vad
     }
 
+    public var currentThreshold: Float { vad.threshold }
+
+    /// Stop capture and apply calibration after all queued samples have been processed.
+    public func stopCalibration() throws -> Float {
+        guard let activeWorker = worker else { throw CalibrationError.tooShort }
+        stop()
+        return try activeWorker.completeCalibration()
+    }
+
     public func requestPermission() async -> Bool {
         await AVAudioApplication.requestRecordPermission()
     }
@@ -31,7 +40,8 @@ public final class MicrophoneCapture {
     // Pass the app's shared session-start host time when available.
     // Omitting it starts a standalone audio session clock.
     public func start(
-        sessionStartHostTime: UInt64? = nil
+        sessionStartHostTime: UInt64? = nil,
+        calibrating: Bool = false
     ) throws {
         guard !isCapturing else { return }
 
@@ -66,7 +76,7 @@ public final class MicrophoneCapture {
                 throw CaptureError.converterUnavailable
             }
 
-            vad.reset()
+            if calibrating { vad.beginCalibration() } else { vad.reset() }
 
             let worker = AudioWorker(
                 converter: converter,
@@ -250,6 +260,10 @@ private final class AudioWorker: @unchecked Sendable {
                 emit(segment)
             }
         }
+    }
+
+    func completeCalibration() throws -> Float {
+        try queue.sync { try vad.completeCalibration() }
     }
 
     private func process(_ captured: CapturedBuffer) throws {

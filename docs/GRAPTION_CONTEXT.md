@@ -224,7 +224,18 @@ Must match `ml/common/features.py` exactly: same order, same normalization. It p
 **VAD**
 - Emits segments with `caption_id` (UUID) and `t_start`/`t_end`.
 - End a segment after 500 ms of silence; force-split at 10s.
+- Keep up to 300 ms of preceding idle audio in memory and prepend it on activation
+  to preserve quieter word beginnings. Move t_start back by the retained sample duration;
+  the 10-second cap includes pre-roll. Clear the buffer on segment completion, Stop,
+  reset, or calibration; never emit an idle-only segment. This cannot recover speech
+  missed entirely by the energy threshold.
 - Start energy-based, then switch to Silero.
+- Development demo supports manual room-noise calibration while caption capture is stopped:
+  collect at least 2 seconds without speaking; threshold = max(0.001, 2 × the
+  90th-percentile RMS of fixed 20 ms windows). Use at most the first 30 seconds;
+  retain the previous threshold on insufficient data. Calibration emits no segments,
+  stores no audio, and applies only for the current app instance. This provisional
+  energy heuristic can miss quiet speech and does not distinguish speech from noise.
 
 **WhisperKit**
 - Transcribes each segment with word timestamps enabled.
@@ -252,6 +263,10 @@ for caption [t0, t1]:
 
 **UI**
 - Live caption list, with the speaker name/color matching a highlight box drawn on that face.
+- Temporary A2 demo shows newest completed captions first. Empty ASR results from
+  segments shorter than 1 second (including retained silence) are logged to the
+  debugger but hidden on screen; short recognized speech remains visible. This is
+  display filtering, not spike rejection or reliable no-speech detection.
 - Tone tag chip; sound alert banners (visual plus haptic).
 - Large and dynamic type, high contrast. Follow Apple's Accessibility HIG.
 
