@@ -86,7 +86,7 @@ Long-term, the tone model moves on-device (Core ML), which removes the server en
 | Area | Choice |
 |---|---|
 | iOS app | Swift, SwiftUI, AVFoundation (capture), Core ML, URLSessionWebSocketTask |
-| Face features | MediaPipe Face Landmarker (iOS SDK in the app, `mediapipe` Python on PACE), **same `.task` model file in both** |
+| Face features | MediaPipe Face Landmarker (iOS SDK in the app, `mediapipe` Python on PACE), installed from the Google MediaPipe Swift package, **same `.task` model file in both** |
 | Transcription | WhisperKit (on-device Whisper). Start with `base.en`, benchmark `small.en` |
 | VAD | Energy-based first; upgrade to Silero VAD |
 | Sound events | Apple SoundAnalysis built-in classifier (`SNClassifySoundRequest`, `.version1`) |
