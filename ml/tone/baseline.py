@@ -109,15 +109,15 @@ def map_tag(arousal, valence):
     #High arousal means that the voice has a lot energy
     #High valence means the emotion is more positive
 
-    if arousal > 0.65 and valence > 0.55:
+    if arousal > 0.65 and valence > 0.45:
         return "excited"
 
     #High arousal + low valence = upset/negative high-energy tone
-    if arousal > 0.65 and valence < 0.4:
+    elif arousal > 0.50 and valence < 0.4:
         return "upset"
 
     #Low arousal indicates a calm or low-energy tone
-    if arousal < 0.3:
+    elif arousal < 0.5 and valence > 0.45:
         return "calm"
 
     #if no rules are met, there is no evidence to assign one of the three tags
