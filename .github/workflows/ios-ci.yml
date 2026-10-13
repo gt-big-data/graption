@@ -23,7 +23,6 @@ jobs:
             -scheme Graption \
             -destination 'generic/platform=iOS Simulator' \
             -sdk iphonesimulator \
-            -arch arm64 \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=YES \
             'EXCLUDED_ARCHS[sdk=iphonesimulator*]=x86_64' \
