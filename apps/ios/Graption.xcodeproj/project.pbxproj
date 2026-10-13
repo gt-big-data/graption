@@ -3,8 +3,12 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 110;
+	objectVersion = 77;
 	objects = {
+
+/* Begin PBXBuildFile section */
+        A02900000000000000000001 /* GraptionCore in Frameworks */ = {isa = PBXBuildFile; productRef = A02900000000000000000003 /* GraptionCore */; };
+/* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		9835CFB0306C55AA00F6C1EC /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Base.xcconfig; path = Config/Base.xcconfig; sourceTree = "<group>"; };
@@ -23,6 +27,7 @@
 		9835CF9E306C55A900F6C1EC /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+                A02900000000000000000001 /* GraptionCore in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -62,6 +67,9 @@
 				9835CFA3306C55A900F6C1EC /* Graption */,
 			);
 			name = Graption;
+            packageProductDependencies = (
+                A02900000000000000000003 /* GraptionCore */,
+            );
 			productName = Graption;
 			productReference = 9835CFA1306C55A900F6C1EC /* Graption.app */;
 			productType = "com.apple.product-type.application";
@@ -92,6 +100,9 @@
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9835CFA2306C55A900F6C1EC /* Products */;
+            packageReferences = (
+                A02900000000000000000002 /* XCLocalSwiftPackageReference "Packages/GraptionCore" */,
+            );
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -115,6 +126,20 @@
 			);
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin XCLocalSwiftPackageReference section */
+        A02900000000000000000002 /* XCLocalSwiftPackageReference "Packages/GraptionCore" */ = {
+            isa = XCLocalSwiftPackageReference;
+            relativePath = Packages/GraptionCore;
+        };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+        A02900000000000000000003 /* GraptionCore */ = {
+            isa = XCSwiftPackageProductDependency;
+            productName = GraptionCore;
+        };
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		9835CFAA306C55AA00F6C1EC /* Debug configuration for PBXProject "Graption" */ = {
