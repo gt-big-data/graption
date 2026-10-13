@@ -206,7 +206,9 @@ frames are echoed as base64 with `request_encoding: "base64"`. These replies are
 only to the originating client and must never enter server logs or storage. Authentication
 failures still reject the handshake. Version 1.1 adds `session_error`; clients must use
 `schema_version: "1.1"` in all events. Pydantic types live in `server/app/events.py` and
-Swift types in `schemas/generated/Events.swift` (not wired into the iOS app yet).
+Swift types in `apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`, generated with
+`npx quicktype@23.2.6 -s schema schemas/events.schema.json --lang swift --top-level Events
+--density normal -o apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`.
 
 Base64 JSON is fine for the MVP (~130 KB for a 3s segment). Binary frames are a later optimization.
 

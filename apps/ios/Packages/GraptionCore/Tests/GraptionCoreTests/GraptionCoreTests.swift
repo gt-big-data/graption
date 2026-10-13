@@ -10,7 +10,7 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "speaker_scores",
         "session_id": "session-xyz",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "t": 4.5,
         "faces": [
             {
@@ -26,7 +26,7 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "caption",
         "session_id": "session-xyz",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "caption_id": "12345678-abcd-ef01-2345-6789abcdef01",
         "t_start": 1.0,
         "t_end": 3.5,
@@ -43,7 +43,7 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "sound_event",
         "session_id": "session-xyz",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "t": 12.4,
         "label": "doorbell",
         "confidence": 0.92
@@ -54,7 +54,7 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "tone_request",
         "session_id": "session-xyz",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "caption_id": "12345678-abcd-ef01-2345-6789abcdef01",
         "t_start": 1.0,
         "t_end": 3.5,
@@ -67,11 +67,11 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "caption_log",
         "session_id": "session-xyz",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "caption": {
             "type": "caption",
             "session_id": "session-xyz",
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "caption_id": "12345678-abcd-ef01-2345-6789abcdef01",
             "t_start": 1.0,
             "t_end": 3.5,
@@ -85,17 +85,27 @@ final class GraptionCoreTests: XCTestCase {
 
     let sampleToneResultJson = """
     {
-        "type": "speaker_scores",
+        "type": "tone_result",
         "session_id": "session-xyz",
-        "schema_version": "1.0",
-        "t": 4.5,
-        "faces": [
-            {
-            "face_id": "f1",
-            "p": 0.85,
-            "bbox": [10.0, 20.0, 150.0, 200.0]
-            }
-        ]
+        "schema_version": "1.1",
+        "caption_id": "12345678-abcd-ef01-2345-6789abcdef01",
+        "tag": null,
+        "probs": { "anger": 0.0, "disgust": 0.0, "fear": 0.0, "happy": 0.0, "neutral": 0.0, "sad": 0.0 },
+        "model_version": "tone-stub-v1",
+        "latency_ms": { "recv_to_send": 0.13 }
+    }
+    """.data(using: .utf8)!
+
+    let sampleSessionErrorJson = """
+    {
+        "type": "session_error",
+        "session_id": "session-xyz",
+        "schema_version": "1.1",
+        "code": "invalid_json",
+        "message": "Request is not valid JSON.",
+        "request": "{not json",
+        "request_encoding": "text",
+        "model_version": "tone-stub-v1"
     }
     """.data(using: .utf8)!
 
@@ -110,6 +120,13 @@ final class GraptionCoreTests: XCTestCase {
         XCTAssertNoThrow(try decoder.decode(Events.self, from: sampleToneRequestJson))
         XCTAssertNoThrow(try decoder.decode(Events.self, from: sampleCaptionLogJson))
         XCTAssertNoThrow(try decoder.decode(Events.self, from: sampleToneResultJson))
+        XCTAssertNoThrow(try decoder.decode(Events.self, from: sampleSessionErrorJson))
+
+        // 3. Old schema versions are rejected
+        let staleToneResultJson = String(decoding: sampleToneResultJson, as: UTF8.self)
+            .replacingOccurrences(of: "\"1.1\"", with: "\"1.0\"")
+            .data(using: .utf8)!
+        XCTAssertThrowsError(try decoder.decode(Events.self, from: staleToneResultJson))
     }
 
     func testClockSavesTime() {
