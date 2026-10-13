@@ -14,16 +14,16 @@ doc, say so. Don't silently diverge. If a decision changes, update the doc in th
   No confident tag → `null` (a wrong tag is worse than none).
 - **No audio is ever stored** by the server (no disk, no logs). Only text, tags, probs, timings.
 - **No secrets, datasets, weights, or recordings in git.** Secrets in `.env` / `.xcconfig`
-  (gitignored); data on PACE; model artifacts in W&B.
+  (gitignored); data in the team's shared Drive; model artifacts in W&B.
 - **OpenAI is never called from the iOS app.** Only from `language/` benchmark scripts.
-- The only cloud piece is the optional tone server. Training runs on PACE only.
+- The only cloud piece is the optional tone server. Training runs locally on team Macs.
 
 ## Conventions
 - **Interfaces first:** every model sits behind a protocol/class (`SpeakerScorer`, `ToneBackend`)
   with a stub/mock, so swapping models touches nothing else.
 - **Features are defined once** in `ml/common/features.py`; Swift mirrors it, tested against
   `ml/common/fixtures/`. Changing it invalidates trained models: flag it loudly.
-- **Events:** `schemas/events.schema.json` (v1.0) is the cross-team contract. Pydantic
+- **Events:** `schemas/events.schema.json` (v1.1) is the cross-team contract. Pydantic
   (`datamodel-code-generator`) and Swift (`quicktype`) types are generated from it, never
   hand-edited. Schema change → bump `schema_version`, regenerate, update `schemas/tests/`.
 - All timestamps: seconds since session start on the **phone's** monotonic clock.
