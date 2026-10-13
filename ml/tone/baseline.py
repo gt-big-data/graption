@@ -1,6 +1,6 @@
 #allows me to measure processing time per audio clip
 #pathlib finds all the audio files within test_audio
-#soundfile loads in the audio files + allows for deterministric qualities
+#soundfile loads in the audio files + reads their sample rate
 #pytorch imports Pytorch, ML framework for audEERING model
 #torch.nn neural-network components
 #scipy.signal resamples audio from 48,000 Hz to 16,000 Hz
@@ -103,33 +103,35 @@ def load_audio(audio_file):
 
     return audio, sample_rate
 
-#the following thresholds are defined in the GRAPTION_CONTEXT.md
+#modified defined thresholds from GRAPTION_CONTEXT.md
 def map_tag(arousal, valence):
 
     #High arousal means that the voice has a lot energy
     #High valence means the emotion is more positive
-
-    if arousal > 0.65 and valence > 0.45:
+    if arousal > 0.64 and valence > 0.45:
         return "excited"
 
     #High arousal + low valence = upset/negative high-energy tone
-    elif arousal > 0.50 and valence < 0.4:
+    elif arousal > 0.47 and valence < 0.4:
         return "upset"
 
-    #Low arousal indicates a calm or low-energy tone
-    elif arousal < 0.5 and valence > 0.45:
+    #Moderate arousal and positive valence indicates a calm or low-energy tone
+    elif 0.38 < arousal < 0.48 and valence > 0.45:
         return "calm"
 
     #if no rules are met, there is no evidence to assign one of the three tags
     else:
-        return "none"
+        return None
 
 #extract intended category from filename
 def extract_tag(audio_file):
     #use first part of filename as the intended category
     #this is bc filenames are organized as calm_clip_one.mp3
     filename = Path(audio_file).name
-    return filename.split("_")[0]  #category first part of the filename
+    category = filename.split("_")[0]  #category first part of the filename
+    if category == "none": #Convert "none" from the filename into Python's None value
+        return None
+    return category
 
 #function that runs the model on one clip and measures its infernece time
 def analyze_clip(audio_file):
