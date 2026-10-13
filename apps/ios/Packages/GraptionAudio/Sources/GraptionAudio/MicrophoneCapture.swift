@@ -13,11 +13,23 @@ import Dispatch
 public final class MicrophoneCapture {
     private let engine = AVAudioEngine()
     private let vad: EnergyVAD
+    private let soundDetector: SoundDetector?
 
     private var worker: AudioWorker?
     private var isCapturing = false
 
     public var onSegment: ((AudioSegment) -> Void)?
+    public var onSoundAlert: ((SoundAlert) -> Void)?
+    public var onError: ((Error) -> Void)?
+
+    // The sound detector shares the same converted mic stream
+    // as the VAD. Pass nil to capture speech only.
+    public init(
+        vad: EnergyVAD,
+        soundDetector: SoundDetector? = nil
+    ) {
+        self.vad = vad
+        self.soundDetector = soundDetector
     public var onError: ((Error) -> Void)?
 
     public init(vad: EnergyVAD) {
@@ -72,10 +84,14 @@ public final class MicrophoneCapture {
                 converter: converter,
                 outputFormat: outputFormat,
                 vad: vad,
+                soundDetector: soundDetector,
                 sessionStartHostTime:
                     sessionStartHostTime ?? mach_absolute_time(),
                 deliver: { [weak self] segment in
                     self?.onSegment?(segment)
+                },
+                deliverAlert: { [weak self] alert in
+                    self?.onSoundAlert?(alert)
                 },
                 reportError: { [weak self] error in
                     self?.onError?(error)
@@ -201,6 +217,7 @@ private final class AudioWorker: @unchecked Sendable {
     private let converter: AVAudioConverter
     private let outputFormat: AVAudioFormat
     private let vad: EnergyVAD
+    private let soundDetector: SoundDetector?
     private let sessionStartHostTime: UInt64
 
     private let deliver: @MainActor @Sendable (AudioSegment) -> Void
@@ -213,6 +230,10 @@ private final class AudioWorker: @unchecked Sendable {
         converter: AVAudioConverter,
         outputFormat: AVAudioFormat,
         vad: EnergyVAD,
+        soundDetector: SoundDetector?,
+        sessionStartHostTime: UInt64,
+        deliver: @escaping @MainActor @Sendable (AudioSegment) -> Void,
+        deliverAlert: @escaping @MainActor @Sendable (SoundAlert) -> Void,
         sessionStartHostTime: UInt64,
         deliver: @escaping @MainActor @Sendable (AudioSegment) -> Void,
         reportError: @escaping @MainActor @Sendable (Error) -> Void
@@ -220,6 +241,17 @@ private final class AudioWorker: @unchecked Sendable {
         self.converter = converter
         self.outputFormat = outputFormat
         self.vad = vad
+        self.soundDetector = soundDetector
+        self.sessionStartHostTime = sessionStartHostTime
+        self.deliver = deliver
+        self.reportError = reportError
+
+        // Alerts don't wait for a VAD segment to finish.
+        soundDetector?.start { alert in
+            DispatchQueue.main.async {
+                deliverAlert(alert)
+            }
+        }
         self.sessionStartHostTime = sessionStartHostTime
         self.deliver = deliver
         self.reportError = reportError
@@ -249,6 +281,8 @@ private final class AudioWorker: @unchecked Sendable {
             if let segment = vad.flush() {
                 emit(segment)
             }
+
+            soundDetector?.finish()
         }
     }
 
@@ -322,6 +356,11 @@ private final class AudioWorker: @unchecked Sendable {
                     + Double(outputSampleCount) / outputFormat.sampleRate
 
                 outputSampleCount += samples.count
+
+                soundDetector?.process(
+                    samples: samples,
+                    tStart: timestamp
+                )
 
                 for segment in vad.process(
                     samples: samples,
