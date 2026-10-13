@@ -42,9 +42,50 @@ apps/ios/
 Add a package with **File → New → Package…** saved into `apps/ios/Packages/`, then add it to the
 Graption target under **General → Frameworks, Libraries, and Embedded Content**.
 
-## Before adding real features (unverified)
-- MediaPipe's iOS SDK is distributed through CocoaPods (`MediaPipeTasksVision`), probably not SwiftPM,
-  so the MediaPipe wrapper may need to live in the app target behind a protocol.
+## MediaPipe Face Landmarker V1
+
+Google's current iOS setup guide supports Swift Package Manager. Use it for this project:
+
+1. In Xcode with Graption.xcodeproj opened, choose **File -> Add Package Dependencies...**.
+2. Add `https://github.com/google-ai-edge/mediapipe` and select the `MediaPipeTasksVision`
+    product for the `Graption` target. `MediaPipeTasksCommon` is included automatically.
+      - There is a chance that MediaPipeTasksVision doesnt get caught, in that case reinstall
+      the package setting the dependency Rule to Branch and typing in master in the box to the 
+      right. It should show after this
+3. Download Google's Face Landmarker model bundle from the [Face Landmarker models]
+    (https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/index#models)
+    documentation. Add the downloaded `face_landmarker.task` to the `Graption` target's app
+    resources. The file is ignored by git, so every developer downloads it locally.
+      - Just drag and drop into the blue folder on xcode - the file name must be the exact same
+      and show up under copy bundle resources in build phases when Graption app is targeted.
+4. Add `NSCameraUsageDescription` to the app target's Info.plist. The generated Info.plist
+    setting can be supplied as `INFOPLIST_KEY_NSCameraUsageDescription` in the target build
+    settings.
+   - Target: Graption -> Info -> Click plus on the last item in Custom iOS Target Properties
+     -> Select: Privacy - Camera Usage Description -> on the right field enter the message 
+     (ex. Graption needs camera access to analyze your face.)
+5. Build from Xcode once so SPM resolves the package. A physical iPhone is required for the
+    live camera result; the simulator cannot provide a useful camera test.
+   - All the set up for connecting a device with ICloud needs to be done for this
+The older Face Landmarker page also documents CocoaPods, but SPM is the current project setup
+path and avoids introducing a `Podfile` and generated workspace into this repository.
+
+V1 implementation contract:
+
+- Capture the back camera with `AVCaptureSession` at 15 fps and pass full frames to
+   `FaceLandmarker.detectAsync(image:timestampInMilliseconds:)`.
+- Configure `runningMode = .liveStream`, `numFaces = 4`, `outputFaceBlendshapes = true`, and
+   `outputFacialTransformationMatrixes = true`.
+- Convert each result's normalized landmarks into a bounding rectangle, publish results on the
+   main actor, and draw one overlay rectangle per detected face over the preview.
+- Keep camera capture and MediaPipe behind the planned `GraptionVision` boundary so the later
+   tracker and speaker model can consume the same per-frame results.
+
+Official references: [MediaPipe iOS setup]
+(https://developers.google.com/edge/mediapipe/solutions/setup_ios) and [Face Landmarker iOS]
+(https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/ios).
+
+WhisperKit is SwiftPM (`argmaxinc/WhisperKit`).
 - WhisperKit is SwiftPM (`argmaxinc/WhisperKit`).
 - Minimum iOS is 17.0 for now; lower it if a team phone can't run 17. On-device summaries need iOS 26+.
 

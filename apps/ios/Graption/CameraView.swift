@@ -9,8 +9,9 @@ import SwiftUI
 import AVFoundation
 import Combine
 import UIKit
+import MediaPipeTasksVision
 
-final class CameraController: NSObject, ObservableObject {
+final class CameraController: NSObject, ObservableObject, FaceLandmarkerLiveStreamDelegate {
     enum Status {
         case notDetermined
         case configuring
@@ -20,9 +21,13 @@ final class CameraController: NSObject, ObservableObject {
     }
 
     @Published private(set) var status: Status = .notDetermined
+    @Published private(set) var faceBoxes: [CGRect] = []
+    @Published private(set) var detectedFaceCount = 0
 
     let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "com.graption.camera.session")
+    private let videoOutput = AVCaptureVideoDataOutput()
+    private var faceLandmarker: FaceLandmarker?
 
     func start() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -54,6 +59,44 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
+    func faceLandmarker(
+        _ faceLandmarker: FaceLandmarker,
+        didFinishDetection result: FaceLandmarkerResult?,
+        timestampInMilliseconds: Int,
+        error: Error?
+    ) {
+        guard error == nil, let result else {
+            if let error {
+                print("MediaPipe detection error: \(error.localizedDescription)")
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.faceBoxes = []
+                self?.detectedFaceCount = 0
+            }
+            return
+        }
+
+        let boxes: [CGRect] = result.faceLandmarks.compactMap { landmarks in
+            let xs = landmarks.map { CGFloat($0.x) }
+            let ys = landmarks.map { CGFloat($0.y) }
+            guard let minX = xs.min(), let maxX = xs.max(),
+                  let minY = ys.min(), let maxY = ys.max() else {
+                return nil
+            }
+            return CGRect(
+                x: minX,
+                y: minY,
+                width: maxX - minX,
+                height: maxY - minY
+            )
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.faceBoxes = boxes
+            self?.detectedFaceCount = boxes.count
+        }
+    }
+
     // Back camera, 720p, 15 fps
     private func configureAndStart() {
         sessionQueue.async { [weak self] in
@@ -78,12 +121,74 @@ final class CameraController: NSObject, ObservableObject {
             }
             self.session.addInput(input)
 
+            self.videoOutput.videoSettings = [
+                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+            ]
+            self.videoOutput.alwaysDiscardsLateVideoFrames = true
+            self.videoOutput.setSampleBufferDelegate(self, queue: self.sessionQueue)
+            guard self.session.canAddOutput(self.videoOutput) else {
+                self.session.commitConfiguration()
+                DispatchQueue.main.async { self.status = .unsupported }
+                return
+            }
+            self.session.addOutput(self.videoOutput)
+
+            if let connection = self.videoOutput.connection(with: .video),
+               connection.isVideoOrientationSupported {
+                connection.videoOrientation = .portrait
+            }
+
+            guard let modelPath = Bundle.main.path(
+                forResource: "face_landmarker",
+                ofType: "task"
+            ) else {
+                self.session.commitConfiguration()
+                DispatchQueue.main.async { self.status = .unsupported }
+                return
+            }
+
+            do {
+                let options = FaceLandmarkerOptions()
+                options.baseOptions.modelAssetPath = modelPath
+                options.runningMode = .liveStream
+                options.numFaces = 4
+                options.outputFaceBlendshapes = true
+                options.outputFacialTransformationMatrixes = true
+                options.faceLandmarkerLiveStreamDelegate = self
+                self.faceLandmarker = try FaceLandmarker(options: options)
+            } catch {
+                self.session.commitConfiguration()
+                DispatchQueue.main.async { self.status = .unsupported }
+                return
+            }
+
             self.configureFrameRate(for: device, fps: 15)
 
             self.session.commitConfiguration()
 
             self.session.startRunning()
             DispatchQueue.main.async { self.status = .running }
+        }
+    }
+
+    private func process(_ sampleBuffer: CMSampleBuffer) {
+        guard let faceLandmarker else { return }
+
+        do {
+            let image = try MPImage(sampleBuffer: sampleBuffer)
+            let timestamp = Int(
+                CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 1_000
+            )
+            try faceLandmarker.detectAsync(
+                image: image,
+                timestampInMilliseconds: timestamp
+            )
+        } catch {
+            print("MediaPipe frame error: \(error.localizedDescription)")
+            DispatchQueue.main.async { [weak self] in
+                self?.faceBoxes = []
+                self?.detectedFaceCount = 0
+            }
         }
     }
 
@@ -101,6 +206,16 @@ final class CameraController: NSObject, ObservableObject {
         } catch {
             // Frame rate could not be configured --> Use default
         }
+    }
+}
+
+extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        process(sampleBuffer)
     }
 }
 
@@ -132,7 +247,27 @@ struct CameraView: View {
 
             switch controller.status {
                 case .running:
-                    CameraPreview(session: controller.session).ignoresSafeArea()
+                    GeometryReader { geometry in
+                        ZStack {
+                            CameraPreview(session: controller.session)
+                                .ignoresSafeArea()
+
+                            ForEach(Array(controller.faceBoxes.enumerated()), id: \.offset) { _, box in
+                                FaceBox(box: box, size: geometry.size)
+                            }
+
+                            Text("Faces: \(controller.detectedFaceCount)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(.black.opacity(0.6), in: Capsule())
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                                .padding(.top, 16)
+                                .padding(.trailing, 16)
+                        }
+                    }
+                    .ignoresSafeArea()
                 case .notDetermined, .configuring:
                     ProgressView()
                 case .denied:
@@ -177,6 +312,24 @@ struct CameraView: View {
         }
         .foregroundStyle(.white)
         .padding()
+    }
+}
+
+private struct FaceBox: View {
+    let box: CGRect
+    let size: CGSize
+
+    var body: some View {
+        Rectangle()
+            .stroke(.yellow, lineWidth: 3)
+            .frame(
+                width: box.width * size.width,
+                height: box.height * size.height
+            )
+            .position(
+                x: box.midX * size.width,
+                y: box.midY * size.height
+            )
     }
 }
 
