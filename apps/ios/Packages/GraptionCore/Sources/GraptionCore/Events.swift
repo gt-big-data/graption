@@ -5,7 +5,7 @@
 
 import Foundation
 
-/// Graption event contract v1.0 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds
+/// Graption event contract v1.1 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds
 /// since session start on the phone's monotonic host clock. Changing this file = bump
 /// schema_version and regenerate Pydantic + Swift types.
 ///
@@ -22,6 +22,9 @@ import Foundation
 /// Tone server -> phone. tag is null when not confident (a wrong tag is worse than none).
 /// Tag vocabulary depends on backend: custom = the 6 emotions minus neutral; audeering
 /// baseline = excited | upset | calm.
+///
+/// Tone server -> client. Malformed request rejected; connection stays open. Request is
+/// echoed only to the originating client, never stored or logged.
 // MARK: - Events
 struct Events: Codable {
     let faces: [EventsSchema]?
@@ -47,6 +50,12 @@ struct Events: Codable {
     let modelVersion: String?
     let probs: Probs?
     let tag: String?
+    let code: String?
+    let message: String?
+    /// Exact received text, or base64 for an unsupported binary frame. May contain audio: never
+    /// store or log.
+    let request: String?
+    let requestEncoding: RequestEncoding?
 
     enum CodingKeys: String, CodingKey {
         case faces = "faces"
@@ -70,6 +79,10 @@ struct Events: Codable {
         case modelVersion = "model_version"
         case probs = "probs"
         case tag = "tag"
+        case code = "code"
+        case message = "message"
+        case request = "request"
+        case requestEncoding = "request_encoding"
     }
 }
 
@@ -112,7 +125,11 @@ extension Events {
         latencyMS: [String: Double]?? = nil,
         modelVersion: String?? = nil,
         probs: Probs?? = nil,
-        tag: String?? = nil
+        tag: String?? = nil,
+        code: String?? = nil,
+        message: String?? = nil,
+        request: String?? = nil,
+        requestEncoding: RequestEncoding?? = nil
     ) -> Events {
         return Events(
             faces: faces ?? self.faces,
@@ -135,7 +152,11 @@ extension Events {
             latencyMS: latencyMS ?? self.latencyMS,
             modelVersion: modelVersion ?? self.modelVersion,
             probs: probs ?? self.probs,
-            tag: tag ?? self.tag
+            tag: tag ?? self.tag,
+            code: code ?? self.code,
+            message: message ?? self.message,
+            request: request ?? self.request,
+            requestEncoding: requestEncoding ?? self.requestEncoding
         )
     }
 
@@ -227,7 +248,7 @@ extension CaptionClass {
 }
 
 enum SchemaVersion: String, Codable {
-    case the10 = "1.0"
+    case the11 = "1.1"
 }
 
 enum CaptionType: String, Codable {
@@ -352,9 +373,15 @@ extension Probs {
     }
 }
 
+enum RequestEncoding: String, Codable {
+    case base64 = "base64"
+    case text = "text"
+}
+
 enum EventsType: String, Codable {
     case caption = "caption"
     case captionLog = "caption_log"
+    case sessionError = "session_error"
     case soundEvent = "sound_event"
     case speakerScores = "speaker_scores"
     case toneRequest = "tone_request"

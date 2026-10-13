@@ -23,7 +23,7 @@ doc, say so. Don't silently diverge. If a decision changes, update the doc in th
   with a stub/mock, so swapping models touches nothing else.
 - **Features are defined once** in `ml/common/features.py`; Swift mirrors it, tested against
   `ml/common/fixtures/`. Changing it invalidates trained models: flag it loudly.
-- **Events:** `schemas/events.schema.json` (v1.0) is the cross-team contract. Pydantic
+- **Events:** `schemas/events.schema.json` (v1.1) is the cross-team contract. Pydantic
   (`datamodel-code-generator`) and Swift (`quicktype`) types are generated from it, never
   hand-edited. Schema change → bump `schema_version`, regenerate, update `schemas/tests/`.
 - All timestamps: seconds since session start on the **phone's** monotonic clock.

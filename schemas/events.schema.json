@@ -2,17 +2,34 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/gt-big-data/graption/schemas/events.schema.json",
   "title": "GraptionEvent",
-  "description": "Graption event contract v1.0 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds since session start on the phone's monotonic host clock. Changing this file = bump schema_version and regenerate Pydantic + Swift types.",
+  "description": "Graption event contract v1.1 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds since session start on the phone's monotonic host clock. Changing this file = bump schema_version and regenerate Pydantic + Swift types.",
   "oneOf": [
     { "$ref": "#/$defs/SpeakerScores" },
     { "$ref": "#/$defs/Caption" },
     { "$ref": "#/$defs/SoundEvent" },
     { "$ref": "#/$defs/ToneRequest" },
     { "$ref": "#/$defs/CaptionLog" },
-    { "$ref": "#/$defs/ToneResult" }
+    { "$ref": "#/$defs/ToneResult" },
+    { "$ref": "#/$defs/SessionError" }
   ],
   "$defs": {
-    "SchemaVersion": { "type": "string", "const": "1.0" },
+    "SchemaVersion": { "type": "string", "const": "1.1" },
+    "SessionError": {
+      "type": "object",
+      "description": "Tone server -> client. Malformed request rejected; connection stays open. Request is echoed only to the originating client, never stored or logged.",
+      "additionalProperties": false,
+      "required": ["type", "session_id", "schema_version", "code", "message", "request", "request_encoding", "model_version"],
+      "properties": {
+        "type": { "const": "session_error" },
+        "session_id": { "$ref": "#/$defs/SessionId" },
+        "schema_version": { "$ref": "#/$defs/SchemaVersion" },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "request": { "type": "string", "description": "Exact received text, or base64 for an unsupported binary frame. May contain audio: never store or log." },
+        "request_encoding": { "enum": ["text", "base64"] },
+        "model_version": { "type": "string" }
+      }
+    },
     "SessionId": { "type": "string", "minLength": 1 },
     "Seconds": { "type": "number", "minimum": 0 },
     "Probability": { "type": "number", "minimum": 0, "maximum": 1 },
