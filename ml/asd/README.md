@@ -7,5 +7,5 @@ Planned: `extract.py` (AVA → MediaPipe → features → `.npz`), `dataset.py`,
 
 - Features come only from `ml/common/features.py`.
 - Baseline to beat: logistic regression on `std(jawOpen)` + `mean(loudness)`.
-- Training runs on PACE. Data and weights never go in git (see `.gitignore`); log runs to W&B.
+- Training runs on team Macs (`mps`). Data and weights never go in git (see `.gitignore`); log runs to W&B.
 - Add deps with `uv add --package graption-ml <pkg>` (torch, mediapipe, coremltools, wandb).

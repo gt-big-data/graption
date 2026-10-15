@@ -17,7 +17,13 @@ graption-ml = { workspace = true }
 graption-language = { workspace = true }
 
 [dependency-groups]
-dev = ["ruff>=0.6", "pytest>=8", "jsonschema>=4.23"]
+dev = [
+    "ruff>=0.6",
+    "pytest>=8",
+    "jsonschema>=4.23",
+    "httpx>=0.28.1",
+    "datamodel-code-generator>=0.83.0",
+]
 
 [tool.ruff]
 line-length = 100
@@ -26,8 +32,16 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# Descriptions are copied verbatim from the schema by datamodel-code-generator.
+"server/app/events.py" = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
 [tool.pytest.ini_options]
 testpaths = ["schemas", "server", "ml", "language"]
+pythonpath = ["server"]
 addopts = "--import-mode=importlib"
 
 [tool.ruff.lint.flake8-bugbear]

@@ -9,10 +9,11 @@
 *.mobileprovision
 service-account*.json
 
-# --- Data, datasets, weights, recordings (live on PACE / W&B) ---
+# --- Data, datasets, weights, recordings (live in the shared Drive / W&B) ---
 data/
 datasets/
 wandb/
+/logs/
 *.npz
 *.npy
 *.pt
@@ -55,9 +56,6 @@ Pods/
 *.dSYM.zip
 *.dSYM
 
-# --- SLURM output ---
-slurm-*.out
-*.err
 
 # --- OS / editors ---
 .DS_Store
