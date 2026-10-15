@@ -9,3 +9,5 @@ PRODUCT_BUNDLE_IDENTIFIER = edu.gatech.graption.$(DEV_SUFFIX)
 INFOPLIST_KEY_NSCameraUsageDescription = Graption uses the camera to see who is speaking.
 
 #include? "Local.xcconfig"
+
+INFOPLIST_KEY_NSMicrophoneUsageDescription = Graption uses your microphone to detect speech and provide live captions.
