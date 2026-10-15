@@ -35,7 +35,7 @@ final class ListeningModel {
 
             let capture = MicrophoneCapture(
                 // Placeholder; tune on a real phone.
-                vad: EnergyVAD(threshold: 0.01),
+                vad: EnergyVAD(threshold: 0.001),
                 soundDetector: try AppleSoundDetector()
             )
 

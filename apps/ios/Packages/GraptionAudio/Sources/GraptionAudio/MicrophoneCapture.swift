@@ -30,10 +30,6 @@ public final class MicrophoneCapture {
     ) {
         self.vad = vad
         self.soundDetector = soundDetector
-    public var onError: ((Error) -> Void)?
-
-    public init(vad: EnergyVAD) {
-        self.vad = vad
     }
 
     public func requestPermission() async -> Bool {
@@ -234,8 +230,6 @@ private final class AudioWorker: @unchecked Sendable {
         sessionStartHostTime: UInt64,
         deliver: @escaping @MainActor @Sendable (AudioSegment) -> Void,
         deliverAlert: @escaping @MainActor @Sendable (SoundAlert) -> Void,
-        sessionStartHostTime: UInt64,
-        deliver: @escaping @MainActor @Sendable (AudioSegment) -> Void,
         reportError: @escaping @MainActor @Sendable (Error) -> Void
     ) {
         self.converter = converter
@@ -252,9 +246,7 @@ private final class AudioWorker: @unchecked Sendable {
                 deliverAlert(alert)
             }
         }
-        self.sessionStartHostTime = sessionStartHostTime
-        self.deliver = deliver
-        self.reportError = reportError
+
     }
 
     func enqueue(_ captured: CapturedBuffer) {
