@@ -256,6 +256,12 @@ for caption [t0, t1]:
 - Filter to an allowlist: doorbell, knock, smoke/fire alarm, siren, dog bark, baby cry, laughter, phone ring.
 - Confidence ≥ 0.7, with a 3s cooldown per label.
 - Verify the exact label strings from `knownClassifications`.
+  The verified mapping (Apple identifier → alert label) lives in `SoundAlertFilter.labels`, and a test checks it.
+- The combined A2/A3 demo uses one microphone capture: continuous converted samples
+  feed SoundAnalysis independently of VAD; onSegment feeds transcription, while
+  onSoundAlert feeds an alert-only presentation model. During calibration, sound
+  classification may run but alert presentation/announcements are suppressed.
+- Window 1 s with 50% overlap (Apple's default is 3 s, too slow for the ≤ 1 s alert lag target).
 
 **ToneClient**
 - Sends a `tone_request` per segment and receives `tone_result`.
@@ -263,7 +269,14 @@ for caption [t0, t1]:
 
 **UI**
 - Live caption list, with the speaker name/color matching a highlight box drawn on that face.
-- Temporary A2 demo shows newest completed captions first. Empty ASR results from
+- Combined A2/A3 demo places matching large Start/Stop listening and calibration
+  controls above the caption feed, with sound banners, haptics, and accessibility
+  announcements. Stop clears the current banner while pending captions finish.
+- Temporary A2 demo shows newest completed captions first, in dark-grey cards with
+  a consistent-width, Dynamic Type-scaled time column, caption text beside it, and
+  small "Transcription latency" below the text (ASR duration, excluding queue/VAD wait).
+  Hide [BLANK_AUDIO] markers from presentation, retaining raw ASR output in debugger logs;
+  omit marker-only results regardless of duration. Empty ASR results from
   segments shorter than 1 second (including retained silence) are logged to the
   debugger but hidden on screen; short recognized speech remains visible. This is
   display filtering, not spike rejection or reliable no-speech detection.
