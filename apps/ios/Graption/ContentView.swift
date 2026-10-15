@@ -3,6 +3,7 @@ import GraptionAudio
 
 @MainActor
 struct ContentView: View {
+    @State private var showCamera = false
     @State private var capture: MicrophoneCapture?
     @State private var soundAlertModel = SoundAlertModel()
     @State private var hasPrintedLabels = false
@@ -19,7 +20,18 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Text(status)
+            HStack {
+                Text(status)
+                Spacer()
+                Button {
+                    showCamera = true
+                } label: {
+                    Label("Camera", systemImage: "camera.fill")
+                }
+                .buttonStyle(.bordered)
+                // Keep camera and microphone demos separate during capture.
+                .disabled(isRecording || isCalibrating || isStarting)
+            }
             if !isReady {
                 Button("Set up base.en (first time needs internet)") {
                     Task { await prepareModel(allowDownload: true) }
@@ -85,6 +97,9 @@ struct ContentView: View {
             }
         }
         .padding()
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraView()
+        }
         .animation(.default, value: soundAlertModel.currentAlert?.id)
         .sensoryFeedback(.warning, trigger: soundAlertModel.currentAlert?.id) { _, new in
             new != nil
