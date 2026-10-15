@@ -14,7 +14,12 @@ public struct SettingsScreen: View {
     @State private var isAddressSaved: Bool = false
     @FocusState private var isAddressFieldFocused: Bool
 
-    public init() {}
+    @State private var showCameraPreview = false
+    private let cameraPreviewDestination: (() -> AnyView)?
+
+    public init(cameraPreviewDestination: (() -> AnyView)? = nil) {
+        self.cameraPreviewDestination = cameraPreviewDestination
+    }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -24,6 +29,9 @@ public struct SettingsScreen: View {
                 VStack(alignment: .leading, spacing: 16) {
                     macServerCard
                     accessibilityCard
+                    if cameraPreviewDestination != nil {
+                        cameraPreviewRow
+                    }
                     storageFootnote
                 }
                 .padding(16)
@@ -34,6 +42,11 @@ public struct SettingsScreen: View {
         .onAppear {
             addressDraft = savedServerAddress
             isAddressSaved = !savedServerAddress.isEmpty
+        }
+        .fullScreenCover(isPresented: $showCameraPreview) {
+            if let cameraPreviewDestination {
+                cameraPreviewDestination()
+            }
         }
     }
 
@@ -177,6 +190,39 @@ public struct SettingsScreen: View {
                 .font(.footnote)
                 .foregroundStyle(Color.graptionSecondaryText)
         }
+    }
+
+    // Dev/debug entry point to the raw AVFoundation camera preview (not part
+    // of the Figma design); only shown when the app target injects one.
+    private var cameraPreviewRow: some View {
+        Button {
+            showCameraPreview = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color.graptionAccent)
+                    .frame(width: 40, height: 40)
+                    .background(Color.white.opacity(0.08), in: Circle())
+
+                Text("Preview Camera")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(Color.graptionAccent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.graptionSecondaryText)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Preview Camera")
     }
 
     private var storageFootnote: some View {

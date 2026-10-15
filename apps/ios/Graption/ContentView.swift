@@ -10,7 +10,7 @@ import GraptionUI
 
 struct ContentView: View {
     var body: some View {
-        LiveCaptionScreen()
+        LiveCaptionScreen(cameraPreviewDestination: { AnyView(CameraView()) })
     }
 }
 

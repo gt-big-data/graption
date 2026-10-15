@@ -19,4 +19,4 @@ build-backend = "hatchling.build"
 dev-mode-dirs = ["."]
 
 [tool.hatch.build.targets.wheel]
-bypass-selection = true
+packages = ["app"]

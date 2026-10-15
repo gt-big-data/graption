@@ -18,8 +18,6 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		9835CFA3306C55A900F6C1EC /* Graption */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Graption;
 			sourceTree = "<group>";
 		};
@@ -65,8 +63,6 @@
 			);
 			buildRules = (
 			);
-			dependencies = (
-			);
 			fileSystemSynchronizedGroups = (
 				9835CFA3306C55A900F6C1EC /* Graption */,
 			);
@@ -103,7 +99,7 @@
 			mainGroup = 9835CF98306C55A900F6C1EC;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "GraptionUI" */,
+				6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "Packages/GraptionUI" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9835CFA2306C55A900F6C1EC /* Products */;
@@ -132,7 +128,7 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		9835CFAA306C55AA00F6C1EC /* Debug */ = {
+		9835CFAA306C55AA00F6C1EC /* Debug configuration for PBXProject "Graption" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -195,7 +191,7 @@
 			};
 			name = Debug;
 		};
-		9835CFAB306C55AA00F6C1EC /* Release */ = {
+		9835CFAB306C55AA00F6C1EC /* Release configuration for PBXProject "Graption" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -251,7 +247,7 @@
 			};
 			name = Release;
 		};
-		9835CFAD306C55AA00F6C1EC /* Debug */ = {
+		9835CFAD306C55AA00F6C1EC /* Debug configuration for PBXNativeTarget "Graption" */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 9835CFB0306C55AA00F6C1EC /* Base.xcconfig */;
 			buildSettings = {
@@ -283,7 +279,7 @@
 			};
 			name = Debug;
 		};
-		9835CFAE306C55AA00F6C1EC /* Release */ = {
+		9835CFAE306C55AA00F6C1EC /* Release configuration for PBXNativeTarget "Graption" */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 9835CFB0306C55AA00F6C1EC /* Base.xcconfig */;
 			buildSettings = {
@@ -321,23 +317,23 @@
 		9835CF9C306C55A900F6C1EC /* Build configuration list for PBXProject "Graption" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				9835CFAA306C55AA00F6C1EC /* Debug */,
-				9835CFAB306C55AA00F6C1EC /* Release */,
+				9835CFAA306C55AA00F6C1EC /* Debug configuration for PBXProject "Graption" */,
+				9835CFAB306C55AA00F6C1EC /* Release configuration for PBXProject "Graption" */,
 			);
 			defaultConfigurationName = Release;
 		};
 		9835CFAC306C55AA00F6C1EC /* Build configuration list for PBXNativeTarget "Graption" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				9835CFAD306C55AA00F6C1EC /* Debug */,
-				9835CFAE306C55AA00F6C1EC /* Release */,
+				9835CFAD306C55AA00F6C1EC /* Debug configuration for PBXNativeTarget "Graption" */,
+				9835CFAE306C55AA00F6C1EC /* Release configuration for PBXNativeTarget "Graption" */,
 			);
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "GraptionUI" */ = {
+		6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "Packages/GraptionUI" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/GraptionUI;
 		};
@@ -346,7 +342,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		1504F8340E9DC8A84ACE6184 /* GraptionUI */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "GraptionUI" */;
+			package = 6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "Packages/GraptionUI" */;
 			productName = GraptionUI;
 		};
 /* End XCSwiftPackageProductDependency section */

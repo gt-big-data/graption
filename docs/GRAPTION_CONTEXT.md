@@ -18,7 +18,7 @@ Example output:
 - **Minimal budget.** Requested: Apple Developer Program ($99), OpenAI API credits ($50), cloud credits ($100). Build everything so it works **without** them; they only unlock user testing and benchmarking.
 - **Dev-first.** The core is a local dev setup. The only cloud piece is an optional hosted tone server for remote user testing.
 - **iOS only.** No Android.
-- **Training compute:** Georgia Tech's PACE cluster (batch jobs, SLURM). PACE is never part of the live app.
+- **Training compute:** the team's M-series Macs (PyTorch on `mps`). Training is never part of the live app.
 - **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi (tone model only).
 - **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network. Only tone tags may depend on a server (Mac or cloud).
 - **User testing:** DHH testers use the app on their own phones at home via TestFlight. Their phones can't reach the dev Mac, which is why the tone server must also run in the cloud (or behind a tunnel).
@@ -37,7 +37,7 @@ The system lives in three places:
 | **iPhone** (Swift app) | Everything live and per-frame; works offline | Capture, MediaPipe, speaker model, VAD, WhisperKit, SoundAnalysis, fusion, UI |
 | **MacBook** (M-series, same Wi-Fi) | Tone model while it's still being iterated on | FastAPI tone server, WavLM + tone head, SQLite logging |
 | **Cloud (optional)** | Same tone server, for remote/TestFlight testers | Docker container on GCP Cloud Run (or Mac + Cloudflare Tunnel as the $0 fallback) |
-| **PACE** | Offline training only | Data prep, training, evaluation, export |
+| **Team Macs** (offline) | Training only | Data prep, training, evaluation, export |
 
 ```
 iPHONE ────────────────────────────────────────────────────────────────
@@ -86,7 +86,7 @@ Long-term, the tone model moves on-device (Core ML), which removes the server en
 | Area | Choice |
 |---|---|
 | iOS app | Swift, SwiftUI, AVFoundation (capture), Core ML, URLSessionWebSocketTask |
-| Face features | MediaPipe Face Landmarker (iOS SDK in the app, `mediapipe` Python on PACE), **same `.task` model file in both** |
+| Face features | MediaPipe Face Landmarker (iOS SDK in the app, `mediapipe` Python on the Mac), **same `.task` model file in both** |
 | Transcription | WhisperKit (on-device Whisper). Start with `base.en`, benchmark `small.en` |
 | VAD | Energy-based first; upgrade to Silero VAD |
 | Sound events | Apple SoundAnalysis built-in classifier (`SNClassifySoundRequest`, `.version1`) |
@@ -96,7 +96,8 @@ Long-term, the tone model moves on-device (Core ML), which removes the server en
 | Tone server | Python 3.11+, `uv`, FastAPI + uvicorn, SQLite, Docker (one image for Mac and cloud) |
 | Cloud (optional) | GCP Cloud Run (CPU container) + a Cloud Storage bucket for logs; Cloudflare Tunnel as the free fallback |
 | Distribution | TestFlight (Apple Developer Program) for testers; Xcode direct install for developers |
-| Training | PACE GPUs, PyTorch, Weights & Biases (free/academic tier) |
+| Training | Team M-series Macs (`mps`), PyTorch, Weights & Biases (free/academic tier) |
+| Data storage | Team shared Google Drive folder (datasets, team recordings) |
 | Labeling | Label Studio (own recordings) |
 | Schema | JSON Schema → Pydantic (`datamodel-code-generator`) + Swift (`quicktype`) |
 | LLM (summaries, Platform team) | Target: Apple Foundation Models (on-device, free). Benchmark: OpenAI API (small models). Prototyping: Ollama |
@@ -128,11 +129,10 @@ graption/
 │   └── tone/                 # embed, train_head, eval, baseline
 ├── language/                 # summary/notes prototypes + OpenAI benchmark scripts (Platform)
 ├── schemas/events.schema.json
-├── scripts/pace/             # SLURM job scripts
 └── docs/                     # this file, diagrams, latency results
 ```
 
-Datasets and model weights **never go in git**. Keep them on PACE storage and log model artifacts to W&B.
+Datasets and model weights **never go in git**. Keep them in the team's shared Google Drive folder and log model artifacts to W&B.
 
 The repo starts with only READMEs in most folders; each team creates the files above as they build.
 
@@ -153,7 +153,7 @@ The repo starts with only READMEs in most folders; each team creates the files a
 All timestamps are **seconds since session start, measured on the phone's monotonic host clock**. Convert camera and audio `CMSampleBuffer` presentation timestamps to host time. The Mac never generates timestamps used for alignment.
 
 ### Event schema (`schemas/events.schema.json`)
-Every event includes `type`, `session_id`, and `schema_version` (start at `"1.0"`).
+Every event includes `type`, `session_id`, and `schema_version` (currently `"1.1"`).
 
 **On-device (Swift types, generated from the schema):**
 ```jsonc
@@ -186,6 +186,29 @@ Every event includes `type`, `session_id`, and `schema_version` (start at `"1.0"
   "probs":{"anger":0.05,"disgust":0.02,"fear":0.03,"happy":0.72,"neutral":0.15,"sad":0.03},
   "model_version":"tone-head-v2", "latency_ms":{"recv_to_send":180} }
 ```
+
+**Malformed request → client (schema v1.1):**
+```json
+{
+  "type": "session_error",
+  "session_id": "demo",
+  "schema_version": "1.1",
+  "code": "invalid_json",
+  "message": "Invalid JSON at line 1, column 1: Expecting value",
+  "request": "not json",
+  "request_encoding": "text",
+  "model_version": "tone-stub-v1"
+}
+```
+The connection stays open after request errors, so the client can correct and resend.
+`request` is the exact received text, including any audio supplied; unsupported binary
+frames are echoed as base64 with `request_encoding: "base64"`. These replies are sent
+only to the originating client and must never enter server logs or storage. Authentication
+failures still reject the handshake. Version 1.1 adds `session_error`; clients must use
+`schema_version: "1.1"` in all events. Pydantic types live in `server/app/events.py` and
+Swift types in `apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`, generated with
+`npx quicktype@23.2.6 -s schema schemas/events.schema.json --lang swift --top-level Events
+--density normal -o apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`.
 
 Base64 JSON is fine for the MVP (~130 KB for a 3s segment). Binary frames are a later optimization.
 
@@ -287,7 +310,19 @@ for caption [t0, t1]:
 
 ## 7. Mac tone server spec
 
+- **Skeleton implemented:** `GET /health` returns plain text `ok`. The session endpoint
+  replies to each schema-v1.1 `tone_request` with a matching `tone_result`, `tag: null`,
+  zero probabilities (no prediction), and `model_version: "tone-stub-v1"` through
+  `MockToneBackend`. `caption_log` is accepted and discarded until logging is implemented.
+  Audio stays in memory only. Real inference, SQLite logging, and deployment packaging
+  remain later work; the skeleton always uses the stub regardless of `TONE_BACKEND`.
+  Invalid session messages return `session_error` and keep the connection open. Rejection
+  warnings contain only a fixed rejection code, generated connection ID, and backend model version. The response
+  echoes the received request to its originating client; it is never stored or logged.
 - **Run (Mac):** `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- **Run (verbose, repo root):** `uv run --directory server python -m app --verbose`.
+  The launcher defaults to `--host 0.0.0.0 --port 8000`; either option can be overridden.
+  `--verbose` enables application diagnostics while leaving uvicorn frame logging at INFO.
 - **Run (tunnel):** also run `cloudflared tunnel --url http://localhost:8000`, which gives a free `wss://…trycloudflare.com` URL.
 - **Run (cloud):** build `server/Dockerfile` and deploy to Cloud Run.
   - CPU only, 2 vCPU / 4 GB, min instances 0 (scales to zero between sessions, which keeps credit use low).
@@ -306,12 +341,20 @@ for caption [t0, t1]:
   - arousal > 0.65 and valence < 0.4 → `upset`
   - arousal < 0.3 → `calm`
   - otherwise `null`
-- **Config (env vars):** `TONE_BACKEND` (`audeering` | `custom`), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only).
+- **Config (env vars):** `TONE_BACKEND` (`audeering` | `custom`), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only), `TONE_LOG_DIR` (default repo-root `logs/`).
 - **CPU performance:** the audEERING baseline is the large wav2vec2 variant (~165M params) and may be slow on CPU. Benchmark per-sentence latency on Cloud Run before user testing. If it's over ~1s, use the custom WavLM-base head in cloud mode.
 - **SQLite tables:** `sessions`, `captions` (from `caption_log`), `tone_results` (probs, model_version, latency).
   - Cloud Run disks are ephemeral, so in cloud mode, export the SQLite file to `LOG_EXPORT_BUCKET` at session end.
 - **Privacy:** never write request audio to disk or logs in any mode. Only text, tags, probabilities, and timings are stored.
-- **Logging:** per-request receive, inference, and send timings.
+- **Logging:** application logs go to the console and a fresh gitignored repo-root
+  `logs/server-<UTC-timestamp>-<unique-id>.jsonl` on each server start; the startup log prints
+  the file path. Each run rotates at 5 MiB with three backups; previous runs are preserved. Startup/shutdown and warnings/errors are always logged.
+  `--verbose` adds connection lifecycle, accepted tone/caption requests, frame/audio byte
+  counts, receive-to-send/inference/send timings, and per-connection totals on disconnect.
+  Entries include model versions and generated connection IDs. Never log raw frames,
+  caller-provided session IDs, caption text, tokens, echoed requests, or exception details.
+  UTC log timestamps are diagnostics only; alignment timestamps still come from the phone.
+  Use the application verbose flag rather than uvicorn debug frame logging, which can expose audio.
 - **Campus Wi-Fi** often blocks device-to-device traffic. Use a phone hotspot or a personal router.
 
 ---
@@ -325,7 +368,7 @@ for caption [t0, t1]:
   - Labels: `SPEAKING_AUDIBLE` → 1. `NOT_SPEAKING` → 0. Drop `SPEAKING_NOT_AUDIBLE`.
 - **Team iPhone recordings** (debug mode), labeled in Label Studio. This is the **primary test set**, and possibly fine-tuning data later.
 
-**Extraction (PACE)**
+**Extraction (Mac)**
 1. Resample the video to 15 fps and extract 16 kHz audio.
 2. Run MediaPipe in **VIDEO** mode on full frames, with the same `.task` file as the app.
 3. Match each MediaPipe face to AVA boxes by IoU ≥ 0.5 and take that box's label. Drop unmatched faces.
@@ -363,7 +406,7 @@ for caption [t0, t1]:
 - **Split by actor**, 70/15/15, fixed seed.
 - The dataset is acted, so **team recordings are the real test set**.
 
-**Pipeline (PACE or Mac)**
+**Pipeline (Mac)**
 1. Run every clip through frozen WavLM **once**. Save mean-pooled hidden states from all 13 layers as a `[13, 768]` tensor per clip.
 2. Train only the layer weights (13 params) and the MLP head (about 200k params) on those saved tensors. This takes minutes.
 3. Loss: cross-entropy. Adam, lr 1e-3, early stopping on validation macro-F1.
@@ -440,7 +483,7 @@ If the device is overloaded, degrade in this order:
 
 - **One monorepo, two toolchains:**
   - `apps/ios/` uses **Xcode** (build, sign, run on device, Instruments). Mac required.
-  - `server/`, `ml/`, and `language/` use any IDE (VS Code, Cursor, PyCharm) on any OS. Training runs on PACE.
+  - `server/`, `ml/`, and `language/` use any IDE (VS Code, Cursor, PyCharm) on any OS. Training runs on the team's M-series Macs.
 - **Thin Xcode project** (committed as-is, no XcodeGen; Xcode 16+ synchronized folders mean adding files doesn't touch `.pbxproj`):
   - Put almost all Swift in local Swift packages (`apps/ios/Packages/GraptionCore`, `GraptionVision`, `GraptionAudio`, …).
   - The app target only wires up UI. This avoids `.pbxproj` merge conflicts and lets `swift test` run in CI.
@@ -469,7 +512,7 @@ If the device is overloaded, degrade in this order:
 **Deliberately not requested:**
 - Router: use a phone hotspot.
 - Tripods: handheld recordings are more realistic test data.
-- Colab or GPU credits: PACE covers training.
+- Colab or GPU credits: the team's M-series Macs cover training (free Colab is the fallback).
 
 ---
 
@@ -481,8 +524,10 @@ If the device is overloaded, degrade in this order:
 - **Speaker model on the phone from the start:** it's tiny and converts to Core ML trivially. Iteration happens offline on recorded replays, not live.
 - **Tone model on the Mac for now:** WavLM → Core ML conversion is finicky, and Python iteration is fast. It moves on-device at end of semester.
 - **Face only in v1:** multi-person pose and hands would overload the phone and add little for "who's talking."
+- **No PACE; train on team Macs:** we don't have PACE access. The tone head trains on frozen WavLM embeddings in minutes, and the speaker GRU is about 50k params, so M-series Macs (`mps`) are enough. Datasets and recordings go in a shared Google Drive folder; AVA may need to be a subset.
 - **CREMA-D, not MSP-Podcast; openSMILE dropped:** no license paperwork. The audEERING baseline (trained on MSP-Podcast) gives natural-speech coverage for free. Both remain stretch goals, used only if tests show gaps.
 - **Tone never blocks captions,** and tone tags only show when confident. A wrong tag is worse than none for DHH users.
+- **Recoverable request errors (schema v1.1):** return descriptive `session_error` messages with the received request so manual clients can correct mistakes without reconnecting. Never log or store the echoed payload.
 - **Rule-based fusion before learned fusion:** it produces the logged data a learned version would need.
 - **Committed `.xcodeproj`, not XcodeGen:** synchronized folders plus per-team Swift packages already avoid most merge conflicts, and it saves every teammate a tool install. Signing is per developer via a gitignored `Local.xcconfig`, because free Apple IDs can't share a bundle ID.
 - **Platform owns summaries and the dashboard:** there's no separate language team; it's non-blocking backend-style work that builds on the caption log Platform already moves around.
@@ -493,7 +538,7 @@ If the device is overloaded, degrade in this order:
 ## 17. Open questions
 
 - Does iOS Club have an Apple Developer team account Graption can use?
-- PACE access status, and the AVA download status.
+- AVA on a Mac: download status, and how large a subset we can extract and train on locally.
 - Dashboard scope: summaries, notes, or both? How long are past meetings kept on-device?
 - Oldest iPhone on the team (for performance benchmarks), and which team devices support Apple Intelligence (for Foundation Models).
 - Budget approval outcome.

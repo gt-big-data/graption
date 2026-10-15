@@ -7,13 +7,17 @@ public struct LiveCaptionScreen: View {
     @State private var simulator = LiveCaptionSessionSimulator()
     @State private var showSettings = false
 
-    public init() {}
+    private let cameraPreviewDestination: (() -> AnyView)?
+
+    public init(cameraPreviewDestination: (() -> AnyView)? = nil) {
+        self.cameraPreviewDestination = cameraPreviewDestination
+    }
 
     public var body: some View {
         NavigationStack {
             screenContent
                 .navigationDestination(isPresented: $showSettings) {
-                    SettingsScreen()
+                    SettingsScreen(cameraPreviewDestination: cameraPreviewDestination)
                 }
         }
     }
