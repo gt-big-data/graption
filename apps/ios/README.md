@@ -1,7 +1,7 @@
 # apps/ios: Graption iOS app
 
-Spec: `docs/GRAPTION_CONTEXT.md` §6 (app) and §14 (workflow). Right now it's the blank SwiftUI
-template ("Hello, world!"). Mac + Xcode required.
+Spec: `docs/GRAPTION_CONTEXT.md` §6 (app) and §14 (workflow). Right now it's a debug screen:
+**Start listening** prints speech segments (A1) and shows sound alerts (A3). Mac + Xcode required.
 
 ## Run it (first time, each developer)
 1. Xcode → **Settings → Accounts** → **+** → sign in with your Apple ID (free is fine).
