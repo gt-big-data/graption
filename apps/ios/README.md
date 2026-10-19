@@ -72,12 +72,27 @@ path and avoids introducing a `Podfile` and generated workspace into this reposi
 
 V1 implementation contract:
 
-- Capture the back camera with `AVCaptureSession` at 15 fps and pass full frames to
-   `FaceLandmarker.detectAsync(image:timestampInMilliseconds:)`.
-- Configure `runningMode = .liveStream`, `numFaces = 4`, `outputFaceBlendshapes = true`, and
-   `outputFacialTransformationMatrixes = true`.
-- Convert each result's normalized landmarks into a bounding rectangle, publish results on the
-   main actor, and draw one overlay rectangle per detected face over the preview.
+- Capture the back camera with `AVCaptureSession` at up to 1080p and 15 fps, using continuous
+   autofocus, exposure, and white balance. Buffers are rotated to portrait on the connection.
+- Detect faces with Apple Vision (`VNDetectFaceRectanglesRequest`), which finds faces across a
+   room. MediaPipe's bundled short-range detector only finds faces within about arm's length.
+- There are two landmark modes for now, chosen by `LandmarkMode`. **`.faceCrops` is currently
+   selected**:
+   - `.faceCrops` (selected): runs `FaceLandmarker` in `.image` mode on a 256×256 crop around
+     each Vision face, so far faces get landmarks too. Costs one small MediaPipe run per face.
+   - `.fullFrame`: runs `FaceLandmarker` once per frame on the whole frame in `.video` mode with
+     `numFaces = 4` and attaches each mesh to the Vision box containing its nose tip. Far faces
+     are tracked but get no landmarks.
+   - To switch, change `FaceCaptureEngine(landmarkMode: .faceCrops)` in `CameraController`
+     (`Graption/CameraView.swift`) to `.fullFrame` and rebuild. ASD training extraction must use
+     the same mode; see `docs/GRAPTION_CONTEXT.md` §6.
+   - Blendshapes and transformation matrices stay disabled until a consumer needs them.
+- All inference runs synchronously on one video queue with `alwaysDiscardsLateVideoFrames`, so
+   frames that arrive while busy are dropped and latency never queues up.
+- Tracks are matched greedily by center distance, smoothed with a One Euro filter, keep stable
+   IDs, and coast for at most two missed frames. The overlay draws a solid box for faces with
+   landmarks and a dashed box for faces that were detected but have no mesh. It accounts for the
+   preview's aspect-fill crop.
 - Keep camera capture and MediaPipe behind the planned `GraptionVision` boundary so the later
    tracker and speaker model can consume the same per-frame results.
 
