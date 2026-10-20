@@ -10,6 +10,9 @@ FaceLandmarker = vision.FaceLandmarker
 FaceLandmarkerOptions = vision.FaceLandmarkerOptions
 FaceLandmarkerResult = vision.FaceLandmarkerResult
 VisionRunningMode = vision.RunningMode
+output_face_blendshapes = Trues
+
+latest_landmarks = None
 
 # Create a face landmarker instance with the live stream mode:
 def print_result(
@@ -17,13 +20,21 @@ def print_result(
     output_image: mp.Image,
     timestamp_ms: int
 ):
-    if result.face_landmarks:
-        landmarks = result.face_landmarks[0]
+    global latest_landmarks
 
-        print(f"Number of landmarks: {len(landmarks)}")
-        print(f"First landmark: {landmarks[0]}")
-#def print_result(result: FaceLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
-#    print('face landmarker result: {}'.format(result))
+    if result.face_landmarks:
+        latest_landmarks = result.face_landmarks[0]
+    else:
+        latest_landmarks = None
+
+def draw_landmarks(frame, landmarks):
+    height, width = frame.shape[:2]
+
+    for i, landmark in enumerate(landmarks):
+        x = int(landmark.x * width)
+        y = int(landmark.y * height)
+
+        cv.circle(frame, (x, y), 2, (0, 255, 0), -1)
 
 options = FaceLandmarkerOptions(
     base_options=BaseOptions(model_asset_path=model_path),
@@ -57,6 +68,9 @@ with FaceLandmarker.create_from_options(options) as landmarker:
     timestamp_ms += 1
 
     landmarker.detect_async(mp_image, timestamp_ms)
+
+    if latest_landmarks is not None:
+        draw_landmarks(frame, latest_landmarks)
 
     cv.imshow("Face Landmarker", frame)
 
