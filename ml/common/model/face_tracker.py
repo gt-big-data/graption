@@ -21,6 +21,7 @@ def print_result(
         landmarks = result.face_landmarks[0]
 
         print(f"Number of landmarks: {len(landmarks)}")
+        print(f"First landmark: {landmarks[0]}")
 #def print_result(result: FaceLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
 #    print('face landmarker result: {}'.format(result))
 
