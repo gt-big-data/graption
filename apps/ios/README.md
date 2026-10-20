@@ -73,7 +73,10 @@ path and avoids introducing a `Podfile` and generated workspace into this reposi
 V1 implementation contract:
 
 - Capture the back camera with `AVCaptureSession` at up to 1080p and 15 fps, using continuous
-   autofocus, exposure, and white balance. Buffers are rotated to portrait on the connection.
+   autofocus, exposure, and white balance. Portrait and landscape both work:
+   `AVCaptureDevice.RotationCoordinator` gives one horizon-level angle that is applied to both the
+   preview and the analyzed buffers, so boxes line up with the screen and faces stay upright for
+   Vision and MediaPipe. Tracks reset when the angle changes.
 - Detect faces with Apple Vision (`VNDetectFaceRectanglesRequest`), which finds faces across a
    room. MediaPipe's bundled short-range detector only finds faces within about arm's length.
 - There are two landmark modes for now, chosen by `LandmarkMode`. **`.faceCrops` is currently

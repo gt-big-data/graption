@@ -162,8 +162,8 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     private static let minFaceConfidence: Float = 0.5
 
     let session = AVCaptureSession()
-    /// Called on the video queue after every processed frame.
-    var onFaces: (([FaceTrack]) -> Void)?
+    /// Called on the video queue after every processed frame, with that frame's pixel size.
+    var onFaces: (([FaceTrack], CGSize) -> Void)?
 
     private let sessionQueue = DispatchQueue(label: "com.graption.camera.session")
     // Frames are processed synchronously here. With alwaysDiscardsLateVideoFrames, frames that
@@ -206,6 +206,22 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
             if session.isRunning {
                 session.stopRunning()
             }
+            videoQueue.async { [self] in
+                trackedFaces.removeAll()
+            }
+        }
+    }
+
+    /// Rotates analyzed frames to the preview's angle so boxes and landmarks line up with the
+    /// screen. The preview's horizon-level angle also keeps faces upright for Vision and
+    /// MediaPipe however the phone is held.
+    func setVideoRotationAngle(_ angle: CGFloat) {
+        sessionQueue.async { [self] in
+            guard let connection = videoOutput.connection(with: .video),
+                  connection.isVideoRotationAngleSupported(angle),
+                  connection.videoRotationAngle != angle else { return }
+            connection.videoRotationAngle = angle
+            // Existing tracks are in the old orientation's coordinates.
             videoQueue.async { [self] in
                 trackedFaces.removeAll()
             }
@@ -279,7 +295,8 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         }
         session.addOutput(videoOutput)
 
-        // Rotate buffers to portrait so Vision, MediaPipe, and the preview share one frame.
+        // Start in portrait; the preview's rotation coordinator updates this via
+        // setVideoRotationAngle so Vision, MediaPipe, and the preview share one frame.
         if let connection = videoOutput.connection(with: .video),
            connection.isVideoRotationAngleSupported(90) {
             connection.videoRotationAngle = 90
@@ -298,11 +315,12 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
         guard timestamp.isFinite else { return }
 
+        let frameSize = CGSize(width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
         let faces = updateTracking(with: detectFaces(in: pixelBuffer, timestamp: timestamp), timestamp: timestamp)
         // Skip repeated empty updates so an empty room doesn't re-render SwiftUI at 15 fps.
         if faces.isEmpty && publishedEmpty { return }
         publishedEmpty = faces.isEmpty
-        onFaces?(faces)
+        onFaces?(faces, frameSize)
     }
 
     // MARK: Detection
@@ -578,8 +596,6 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
 }
 
 final class CameraController: ObservableObject {
-    let captureAspectRatio: CGFloat = 9.0 / 16.0
-
     enum Status {
         case notDetermined
         case configuring
@@ -590,6 +606,8 @@ final class CameraController: ObservableObject {
 
     @Published private(set) var status: Status = .notDetermined
     @Published private(set) var faces: [FaceTrack] = []
+    /// Width / height of the analyzed frames; flips when the phone rotates.
+    @Published private(set) var captureAspectRatio: CGFloat = 9.0 / 16.0
 
     // Landmark mode for the whole app. Currently .faceCrops; change to .fullFrame to switch.
     // ASD training extraction must use the same mode (GRAPTION_CONTEXT.md §6).
@@ -597,9 +615,10 @@ final class CameraController: ObservableObject {
     var session: AVCaptureSession { engine.session }
 
     init() {
-        engine.onFaces = { [weak self] faces in
+        engine.onFaces = { [weak self] faces, frameSize in
             DispatchQueue.main.async {
                 self?.faces = faces
+                self?.captureAspectRatio = frameSize.width / frameSize.height
             }
         }
     }
@@ -632,6 +651,10 @@ final class CameraController: ObservableObject {
         faces = []
     }
 
+    func setVideoRotationAngle(_ angle: CGFloat) {
+        engine.setVideoRotationAngle(angle)
+    }
+
     private func startEngine() {
         engine.start { [weak self] success in
             DispatchQueue.main.async {
@@ -643,11 +666,14 @@ final class CameraController: ObservableObject {
 
 private struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    /// Called on the main thread with the preview's rotation angle whenever it changes.
+    let onRotationAngle: (CGFloat) -> Void
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+        view.onRotationAngle = onRotationAngle
         return view
     }
 
@@ -656,6 +682,30 @@ private struct CameraPreview: UIViewRepresentable {
     final class PreviewView: UIView {
         override static var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+        var onRotationAngle: ((CGFloat) -> Void)?
+        private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+        private var rotationObservation: AnyCancellable?
+
+        // The coordinator reads the interface orientation from the layer's window, so start
+        // observing once the view is on screen.
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil, rotationCoordinator == nil,
+                  let device = (previewLayer.session?.inputs.first as? AVCaptureDeviceInput)?.device else { return }
+            let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
+            rotationCoordinator = coordinator
+            rotationObservation = coordinator
+                .publisher(for: \.videoRotationAngleForHorizonLevelPreview)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] angle in self?.applyRotation(angle) }
+        }
+
+        private func applyRotation(_ angle: CGFloat) {
+            if let connection = previewLayer.connection, connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
+            }
+            onRotationAngle?(angle)
+        }
     }
 }
 
@@ -671,8 +721,11 @@ struct CameraView: View {
                 case .running:
                     GeometryReader { geometry in
                         ZStack {
-                            CameraPreview(session: controller.session)
-                                .ignoresSafeArea()
+                            CameraPreview(
+                                session: controller.session,
+                                onRotationAngle: controller.setVideoRotationAngle
+                            )
+                            .ignoresSafeArea()
 
                             ForEach(controller.faces) { face in
                                 FaceBox(

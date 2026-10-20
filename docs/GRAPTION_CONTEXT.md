@@ -218,6 +218,7 @@ Base64 JSON is fine for the MVP (~130 KB for a 3s segment). Binary frames are a 
 
 **Capture**
 - Camera: `AVCaptureSession`, 15 fps, 720p is plenty. Back camera by default; handle front-camera mirroring explicitly.
+- Orientation: portrait and landscape. The analyzed buffers are rotated to the preview's horizon-level angle (`AVCaptureDevice.RotationCoordinator`), so faces are always upright and landmarks are in on-screen coordinates. The frame's aspect ratio therefore changes with orientation (9:16 or 16:9), so features must not depend on it (see FeatureBuilder).
 - Mic: `AVAudioEngine` tap, resampled to **16 kHz mono float32**, in ~20 ms buffers.
 
 **Face detection (Apple Vision)**
