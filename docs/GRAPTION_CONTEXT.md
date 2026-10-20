@@ -41,7 +41,7 @@ The system lives in three places:
 
 ```
 iPHONE ────────────────────────────────────────────────────────────────
- Camera(15fps) → MediaPipe FaceLandmarker → FaceTracker → FeatureBuilder
+ Camera(15fps) → Vision face detector + MediaPipe FaceLandmarker → FaceTracker → FeatureBuilder
                                                             ↓ (15-frame window per face)
  Mic ─┬→ Loudness ─────────────────────────────────→ SpeakerModel (Core ML GRU)
       │                                                     ↓ score per face
@@ -86,7 +86,7 @@ Long-term, the tone model moves on-device (Core ML), which removes the server en
 | Area | Choice |
 |---|---|
 | iOS app | Swift, SwiftUI, AVFoundation (capture), Core ML, URLSessionWebSocketTask |
-| Face features | MediaPipe Face Landmarker (iOS SDK in the app, `mediapipe` Python on the Mac), **same `.task` model file in both** |
+| Face features | MediaPipe Face Landmarker (iOS SDK in the app, `mediapipe` Python on PACE), installed from the Google MediaPipe Swift package, **same `.task` model file in both** |
 | Transcription | WhisperKit (on-device Whisper). Start with `base.en`, benchmark `small.en` |
 | VAD | Energy-based first; upgrade to Silero VAD |
 | Sound events | Apple SoundAnalysis built-in classifier (`SNClassifySoundRequest`, `.version1`) |
@@ -218,11 +218,26 @@ Base64 JSON is fine for the MVP (~130 KB for a 3s segment). Binary frames are a 
 
 **Capture**
 - Camera: `AVCaptureSession`, 15 fps, 720p is plenty. Back camera by default; handle front-camera mirroring explicitly.
+- Orientation: portrait and landscape. The analyzed buffers are rotated to the preview's horizon-level angle (`AVCaptureDevice.RotationCoordinator`), so faces are always upright and landmarks are in on-screen coordinates. The frame's aspect ratio therefore changes with orientation (9:16 or 16:9), so features must not depend on it (see FeatureBuilder).
 - Mic: `AVAudioEngine` tap, resampled to **16 kHz mono float32**, in ~20 ms buffers.
 
-**MediaPipe Face Landmarker**
-- `LIVE_STREAM` mode, `numFaces = 4`, `outputFaceBlendshapes = true`, `outputFacialTransformationMatrixes = true`.
-- Run on the **full frame**, never on crops. This must match training.
+**Face detection (Apple Vision)**
+- `VNDetectFaceRectanglesRequest` (revision 3) on every frame, up to 4 faces, largest first. These boxes drive the tracker.
+- Why not MediaPipe's detector: `face_landmarker.task` bundles the *short-range* BlazeFace, which downsamples the whole frame to 128 px and misses faces beyond roughly arm's length. Vision is free, offline, runs on the Neural Engine, and finds faces across a room.
+
+**MediaPipe Face Landmarker: two modes, face crops currently selected**
+
+For now the app has two ways to get landmarks, chosen by `LandmarkMode`. **`faceCrops` is currently selected.** Both use the Vision boxes above for detection and tracking; they differ only in what MediaPipe sees.
+
+| Mode | What MediaPipe runs on | Far faces | Cost |
+|---|---|---|---|
+| `faceCrops` (**selected**) | A 256×256 crop, 2.2× the face size, around each Vision face. `IMAGE` mode, `numFaces = 2`, keep the mesh nearest the crop center | Boxes **and** landmarks | One small MediaPipe run per face |
+| `fullFrame` | The whole frame, once. `VIDEO` mode (synchronous `LIVE_STREAM`, same cross-frame tracking), `numFaces = 4`; each mesh is attached to the Vision box containing its nose tip | Boxes only, no landmarks | One MediaPipe run per frame |
+
+- In both modes landmarks are returned in full-frame normalized coordinates, so FeatureBuilder and everything downstream are unaffected by the choice.
+- `outputFaceBlendshapes` and `outputFacialTransformationMatrixes` stay off until FeatureBuilder consumes them.
+- **Training must match the selected mode.** With `faceCrops` selected, `ml/asd` extraction must crop the same way (2.2×, 256 px) around the AVA face boxes instead of running on full frames (see §8). Until it does, train/test landmarks differ slightly. Features are nose-centered and divided by inter-ocular distance, so the expected drift is small, but it hasn't been measured. Head pose from the transformation matrix assumes the full camera view, so compute pose from full-frame landmarks (or crop identically in training) before enabling matrices.
+- **Switching modes:** edit one line in `CameraController` in `apps/ios/Graption/CameraView.swift`, `FaceCaptureEngine(landmarkMode: .faceCrops)` → `.fullFrame` (or back), rebuild, and update this section and the extraction to match.
 
 **FaceTracker**
 - Greedy IoU matching of the current frame's faces to existing tracks (IoU ≥ 0.3), then a centroid-distance fallback.
@@ -370,7 +385,7 @@ for caption [t0, t1]:
 
 **Extraction (Mac)**
 1. Resample the video to 15 fps and extract 16 kHz audio.
-2. Run MediaPipe in **VIDEO** mode on full frames, with the same `.task` file as the app.
+2. Run MediaPipe with the same `.task` file as the app, in the **same `LandmarkMode` as the app** (§6). With `faceCrops` (currently selected): crop 2.2× around each AVA face box, resize to 256×256, run `IMAGE` mode, map landmarks back to full-frame coordinates. With `fullFrame`: **VIDEO** mode on full frames.
 3. Match each MediaPipe face to AVA boxes by IoU ≥ 0.5 and take that box's label. Drop unmatched faces.
 4. Compute the 96-dim features via `ml/common/features.py`.
 5. Build 15-frame windows (stride 1 for training).
