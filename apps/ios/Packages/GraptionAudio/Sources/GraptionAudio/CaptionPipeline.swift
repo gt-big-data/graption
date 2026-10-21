@@ -14,6 +14,9 @@ public final class CaptionPipeline {
     public private(set) var isPreparing = false
     public var onResult: ((Delivery) -> Void)?
     public var onError: ((UUID?, Error) -> Void)?
+    /// Called each time the queue empties, after the last result or error is delivered.
+    public var onIdle: (() -> Void)?
+    public var hasPendingWork: Bool { isProcessing || !pending.isEmpty }
 
     private let transcriber: any CaptionTranscriber
     private let maxPendingSegments: Int
@@ -58,7 +61,10 @@ public final class CaptionPipeline {
     }
 
     private func drain() async {
-        defer { isProcessing = false }
+        defer {
+            isProcessing = false
+            onIdle?()
+        }
         while !pending.isEmpty {
             let (segment, receivedAt) = pending.removeFirst()
             let session = generation

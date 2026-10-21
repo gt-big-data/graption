@@ -1,12 +1,16 @@
 import SwiftUI
 
 struct CaptionHeaderView: View {
-    var onBack: () -> Void = {}
+    var subtitle = "Graption • Live camera"
+    /// The back button is hidden when there is nowhere to go back to.
+    var onBack: (() -> Void)?
     var onSettings: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 8) {
-            CircleIconButton(systemName: "chevron.left", accessibilityLabel: "Back", action: onBack)
+            if let onBack {
+                CircleIconButton(systemName: "chevron.left", accessibilityLabel: "Back", action: onBack)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Live captions")
@@ -14,10 +18,10 @@ struct CaptionHeaderView: View {
                     .foregroundStyle(Color.graptionAccent)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
-                Text("Graption • Live camera")
+                Text(subtitle)
                     .font(.footnote)
                     .foregroundStyle(Color.graptionSecondaryText)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .minimumScaleFactor(0.5)
             }
 
@@ -35,5 +39,5 @@ struct CaptionHeaderView: View {
 }
 
 #Preview {
-    CaptionHeaderView()
+    CaptionHeaderView(onBack: {})
 }

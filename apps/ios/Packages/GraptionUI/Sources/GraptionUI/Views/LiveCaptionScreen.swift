@@ -1,61 +1,109 @@
 import SwiftUI
 
-/// U1: the live-captions screen, driven by a scripted fake session until the
-/// real vision/audio/fusion pipeline (P1) is ready to supply real captions,
-/// tone tags, and sound alerts.
-public struct LiveCaptionScreen: View {
-    @State private var simulator = LiveCaptionSessionSimulator()
+/// U1: the live-captions screen. The app target owns the real camera, audio, and
+/// session state and passes them in; `SimulatedLiveCaptionScreen` drives the same
+/// screen from a scripted fake session for previews.
+public struct LiveCaptionScreen<Feed: View>: View {
+    private let captions: [LiveCaption]
+    private let soundAlert: SoundAlert?
+    private let status: String
+    private let isListening: Bool
+    private let onToggleListening: () -> Void
+    private let onRecalibrate: () -> Void
+    private let settingsDestinations: [SettingsDestination]
+    private let feed: Feed
+
     @State private var showSettings = false
+    @State private var showTranscript = false
 
-    private let cameraPreviewDestination: (() -> AnyView)?
-
-    public init(cameraPreviewDestination: (() -> AnyView)? = nil) {
-        self.cameraPreviewDestination = cameraPreviewDestination
+    public init(
+        captions: [LiveCaption],
+        soundAlert: SoundAlert?,
+        status: String,
+        isListening: Bool,
+        onToggleListening: @escaping () -> Void = {},
+        onRecalibrate: @escaping () -> Void = {},
+        settingsDestinations: [SettingsDestination] = [],
+        @ViewBuilder feed: () -> Feed
+    ) {
+        self.captions = captions
+        self.soundAlert = soundAlert
+        self.status = status
+        self.isListening = isListening
+        self.onToggleListening = onToggleListening
+        self.onRecalibrate = onRecalibrate
+        self.settingsDestinations = settingsDestinations
+        self.feed = feed()
     }
 
     public var body: some View {
         NavigationStack {
             screenContent
                 .navigationDestination(isPresented: $showSettings) {
-                    SettingsScreen(cameraPreviewDestination: cameraPreviewDestination)
+                    SettingsScreen(destinations: settingsDestinations)
                 }
         }
     }
 
     private var screenContent: some View {
         VStack(spacing: 0) {
-            CaptionHeaderView(onSettings: { showSettings = true })
+            CaptionHeaderView(subtitle: status, onSettings: { showSettings = true })
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
 
-            if let alert = simulator.soundAlert {
-                SoundAlertBannerView(alert: alert)
+            if let soundAlert {
+                SoundAlertBannerView(alert: soundAlert)
                     .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            LiveVideoFeedView(captions: simulator.captions)
+            LiveVideoFeedView(captions: captions) { feed }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            BottomControlsBar()
-                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+            BottomControlsBar(
+                isListening: isListening,
+                onToggleMic: onToggleListening,
+                onTranscript: { showTranscript = true },
+                onRecalibrate: onRecalibrate
+            )
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
         .background(Color.graptionBackground.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .animation(.easeOut(duration: 0.3), value: simulator.soundAlert)
-        .task {
-            simulator.start()
-        }
-        .onDisappear {
-            simulator.stop()
+        .animation(.easeOut(duration: 0.3), value: soundAlert)
+        .sheet(isPresented: $showTranscript) {
+            TranscriptSheet(captions: captions)
         }
     }
 }
 
+/// The live-captions screen over the placeholder image, driven by the scripted
+/// `LiveCaptionSessionSimulator`. For previews and UI work without a phone.
+public struct SimulatedLiveCaptionScreen: View {
+    @State private var simulator = LiveCaptionSessionSimulator()
+
+    public init() {}
+
+    public var body: some View {
+        LiveCaptionScreen(
+            captions: simulator.captions,
+            soundAlert: simulator.soundAlert,
+            status: "Graption • Simulated session",
+            isListening: true
+        ) {
+            Image("LiveVideoPlaceholder", bundle: .module)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        }
+        .task { simulator.start() }
+        .onDisappear { simulator.stop() }
+    }
+}
+
 #Preview {
-    LiveCaptionScreen()
+    SimulatedLiveCaptionScreen()
 }
 
 #Preview("Accessibility XXXL") {
-    LiveCaptionScreen()
+    SimulatedLiveCaptionScreen()
         .dynamicTypeSize(.accessibility5)
 }

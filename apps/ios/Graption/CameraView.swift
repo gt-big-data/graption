@@ -709,13 +709,15 @@ private struct CameraPreview: UIViewRepresentable {
     }
 }
 
-struct CameraView: View {
-    @StateObject private var controller = CameraController()
-    @Environment(\.dismiss) private var dismiss
+/// Live back-camera preview with the tracked faces drawn on top: a box per face and
+/// the MediaPipe mesh when one was fit. Sized by its container; the owner starts and
+/// stops `controller`.
+struct CameraFeedView: View {
+    @ObservedObject var controller: CameraController
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.black
 
             switch controller.status {
                 case .running:
@@ -725,16 +727,12 @@ struct CameraView: View {
                                 session: controller.session,
                                 onRotationAngle: controller.setVideoRotationAngle
                             )
-                            .ignoresSafeArea()
 
-                            ForEach(controller.faces) { face in
-                                FaceBox(
-                                    box: face.box,
-                                    hasLandmarks: face.hasLandmarks,
-                                    size: geometry.size,
-                                    sourceAspectRatio: controller.captureAspectRatio
-                                )
-                            }
+                            FaceOverlay(
+                                faces: controller.faces,
+                                size: geometry.size,
+                                sourceAspectRatio: controller.captureAspectRatio
+                            )
 
                             Text("Faces: \(controller.faces.count)")
                                 .font(.caption.weight(.semibold))
@@ -747,9 +745,9 @@ struct CameraView: View {
                                 .padding(.trailing, 16)
                         }
                     }
-                    .ignoresSafeArea()
                 case .notDetermined, .configuring:
                     ProgressView()
+                        .tint(.white)
                 case .denied:
                     statusMessage(
                         "Camera access is off",
@@ -764,20 +762,6 @@ struct CameraView: View {
                     )
             }
         }
-        .overlay(alignment: .topLeading) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.backward")
-                    .font(.system(size: 20, weight: .bold))
-                    .frame(width: 30, height: 36)
-            }
-            .padding(.top, 12)
-            .padding(.leading, 16)
-            .tint(.white)
-        }
-        .onAppear { controller.start() }
-        .onDisappear { controller.stop() }
     }
 
     private func statusMessage(_ title: String, detail: String, systemImage: String) -> some View {
@@ -795,31 +779,99 @@ struct CameraView: View {
     }
 }
 
-/// Solid when MediaPipe fit a mesh to the face; dashed when only Vision detected it
-/// (usually a face too small or turned away for landmarks).
-private struct FaceBox: View {
-    let box: CGRect
-    let hasLandmarks: Bool
+/// Full-screen camera with face tracking and a back button (the V1 screen).
+struct CameraView: View {
+    @StateObject private var controller = CameraController()
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        CameraFeedView(controller: controller)
+            .ignoresSafeArea()
+            .overlay(alignment: .topLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.backward")
+                        .font(.system(size: 20, weight: .bold))
+                        .frame(width: 30, height: 36)
+                }
+                .padding(.top, 12)
+                .padding(.leading, 16)
+                .tint(.white)
+            }
+            .onAppear { controller.start() }
+            .onDisappear { controller.stop() }
+    }
+}
+
+/// Draws every tracked face in one pass. Boxes are solid when MediaPipe fit a mesh and
+/// dashed when only Vision detected the face (usually too small or turned away for
+/// landmarks). Meshes show the full tessellation faintly with the contours on top.
+private struct FaceOverlay: View {
+    private static let tesselation = connections(FaceLandmarker.tesselationConnections())
+    private static let contours = connections(FaceLandmarker.contoursConnections())
+
+    let faces: [FaceTrack]
     let size: CGSize
     let sourceAspectRatio: CGFloat
 
     var body: some View {
-        let scale = max(size.width / sourceAspectRatio, size.height)
-        let renderedWidth = sourceAspectRatio * scale
-        let renderedHeight = scale
-        let horizontalCrop = (renderedWidth - size.width) / 2
-        let verticalCrop = (renderedHeight - size.height) / 2
+        Canvas { context, _ in
+            // The preview is aspect-fill, so normalized frame coordinates are scaled to the
+            // larger rendered frame and shifted by the half that is cropped off.
+            let scale = max(size.width / sourceAspectRatio, size.height)
+            let renderedSize = CGSize(width: sourceAspectRatio * scale, height: scale)
+            let crop = CGPoint(
+                x: (renderedSize.width - size.width) / 2,
+                y: (renderedSize.height - size.height) / 2
+            )
+            func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                CGPoint(x: x * renderedSize.width - crop.x, y: y * renderedSize.height - crop.y)
+            }
 
-        Rectangle()
-            .stroke(.yellow, style: StrokeStyle(lineWidth: 3, dash: hasLandmarks ? [] : [8, 6]))
-            .frame(
-                width: box.width * renderedWidth,
-                height: box.height * renderedHeight
-            )
-            .position(
-                x: box.midX * renderedWidth - horizontalCrop,
-                y: box.midY * renderedHeight - verticalCrop
-            )
+            for face in faces {
+                let box = CGRect(
+                    origin: point(face.box.minX, face.box.minY),
+                    size: CGSize(
+                        width: face.box.width * renderedSize.width,
+                        height: face.box.height * renderedSize.height
+                    )
+                )
+                context.stroke(
+                    Path(box),
+                    with: .color(.yellow),
+                    style: StrokeStyle(lineWidth: 3, dash: face.hasLandmarks ? [] : [8, 6])
+                )
+
+                guard face.hasLandmarks else { continue }
+                let points = face.landmarks.map { point(CGFloat($0.x), CGFloat($0.y)) }
+                context.stroke(
+                    mesh(Self.tesselation, points: points),
+                    with: .color(.white.opacity(0.35)),
+                    lineWidth: 0.5
+                )
+                context.stroke(
+                    mesh(Self.contours, points: points),
+                    with: .color(.cyan),
+                    lineWidth: 1.5
+                )
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func mesh(_ edges: [(Int, Int)], points: [CGPoint]) -> Path {
+        Path { path in
+            for (start, end) in edges where start < points.count && end < points.count {
+                path.move(to: points[start])
+                path.addLine(to: points[end])
+            }
+        }
+    }
+
+    private static func connections(_ connections: [Connection]) -> [(Int, Int)] {
+        connections.map { (Int($0.start), Int($0.end)) }
     }
 }
 

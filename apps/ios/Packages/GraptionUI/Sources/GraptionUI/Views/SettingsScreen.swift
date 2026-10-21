@@ -1,5 +1,20 @@
 import SwiftUI
 
+/// An extra row at the bottom of Settings that pushes a screen the app target owns.
+public struct SettingsDestination: Identifiable {
+    public let id: String
+    public let title: String
+    public let systemImage: String
+    public let destination: () -> AnyView
+
+    public init(title: String, systemImage: String, destination: @escaping () -> AnyView) {
+        self.id = title
+        self.title = title
+        self.systemImage = systemImage
+        self.destination = destination
+    }
+}
+
 /// U3: Connection & Preferences. Collects and persists the Mac tone-server
 /// address and the tone-tags toggle locally on the phone. No networking or
 /// server discovery happens here — that's wired up separately once the
@@ -14,11 +29,10 @@ public struct SettingsScreen: View {
     @State private var isAddressSaved: Bool = false
     @FocusState private var isAddressFieldFocused: Bool
 
-    @State private var showCameraPreview = false
-    private let cameraPreviewDestination: (() -> AnyView)?
+    private let destinations: [SettingsDestination]
 
-    public init(cameraPreviewDestination: (() -> AnyView)? = nil) {
-        self.cameraPreviewDestination = cameraPreviewDestination
+    public init(destinations: [SettingsDestination] = []) {
+        self.destinations = destinations
     }
 
     public var body: some View {
@@ -29,8 +43,8 @@ public struct SettingsScreen: View {
                 VStack(alignment: .leading, spacing: 16) {
                     macServerCard
                     accessibilityCard
-                    if cameraPreviewDestination != nil {
-                        cameraPreviewRow
+                    ForEach(destinations) { destination in
+                        destinationRow(destination)
                     }
                     storageFootnote
                 }
@@ -42,11 +56,6 @@ public struct SettingsScreen: View {
         .onAppear {
             addressDraft = savedServerAddress
             isAddressSaved = !savedServerAddress.isEmpty
-        }
-        .fullScreenCover(isPresented: $showCameraPreview) {
-            if let cameraPreviewDestination {
-                cameraPreviewDestination()
-            }
         }
     }
 
@@ -192,20 +201,19 @@ public struct SettingsScreen: View {
         }
     }
 
-    // Dev/debug entry point to the raw AVFoundation camera preview (not part
-    // of the Figma design); only shown when the app target injects one.
-    private var cameraPreviewRow: some View {
-        Button {
-            showCameraPreview = true
+    // Screens the app target injects (not part of the Figma design).
+    private func destinationRow(_ destination: SettingsDestination) -> some View {
+        NavigationLink {
+            destination.destination()
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "camera.fill")
+                Image(systemName: destination.systemImage)
                     .font(.system(size: 18))
                     .foregroundStyle(Color.graptionAccent)
                     .frame(width: 40, height: 40)
                     .background(Color.white.opacity(0.08), in: Circle())
 
-                Text("Preview Camera")
+                Text(destination.title)
                     .font(.subheadline.bold())
                     .foregroundStyle(Color.graptionAccent)
                     .lineLimit(1)
@@ -222,7 +230,7 @@ public struct SettingsScreen: View {
             .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Preview Camera")
+        .accessibilityLabel(destination.title)
     }
 
     private var storageFootnote: some View {
