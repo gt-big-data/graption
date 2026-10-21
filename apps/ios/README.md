@@ -2,6 +2,14 @@
 
 Spec: `docs/GRAPTION_CONTEXT.md` §6 (app) and §14 (workflow). Mac + Xcode required; GraptionCore requires Swift 6.0+.
 
+## Demo branch (`demo`)
+Integrates main (camera + Vision/MediaPipe face tracking) with PRs #66 (audio), #67 (UI), #62 (saved
+sessions). On launch: camera feed with face boxes + MediaPipe meshes, WhisperKit base.en loads (first
+run downloads it, needs internet; offline after), ~2.5 s room-noise calibration (stay quiet), then live
+captions at the bottom of the feed. Mic button pauses (and saves the session), waveform button
+recalibrates, Transcript shows the whole session, Settings › Saved Sessions lists past sessions.
+Speakers show as "Someone" until fusion exists; no tone tags (no server).
+
 ## Run it (first time, each developer)
 1. Xcode → **Settings → Accounts** → **+** → sign in with your Apple ID (free is fine).
 2. `cp apps/ios/Config/Local.xcconfig.example apps/ios/Config/Local.xcconfig` and fill in
