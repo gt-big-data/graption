@@ -11,6 +11,7 @@
 		5A863841E58064FDABEE6763 /* GraptionUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1504F8340E9DC8A84ACE6184 /* GraptionUI */; };
 		19DABF99307713050033A27A /* MediaPipeTasksAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF98307713050033A27A /* MediaPipeTasksAudio */; };
 		19DABF9B307713050033A27A /* MediaPipeTasksVision in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF9A307713050033A27A /* MediaPipeTasksVision */; };
+		19DABF9E307713050033A27A /* GraptionVision in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF9D307713050033A27A /* GraptionVision */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,6 +48,7 @@
 				5A863841E58064FDABEE6763 /* GraptionUI in Frameworks */,
 				19DABF9B307713050033A27A /* MediaPipeTasksVision in Frameworks */,
 				19DABF99307713050033A27A /* MediaPipeTasksAudio in Frameworks */,
+				19DABF9E307713050033A27A /* GraptionVision in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -112,6 +114,7 @@
 				1504F8340E9DC8A84ACE6184 /* GraptionUI */,
 				19DABF98307713050033A27A /* MediaPipeTasksAudio */,
 				19DABF9A307713050033A27A /* MediaPipeTasksVision */,
+				19DABF9D307713050033A27A /* GraptionVision */,
 			);
 			productName = Graption;
 			productReference = 9835CFA1306C55A900F6C1EC /* Graption.app */;
@@ -145,6 +148,7 @@
 				65CCECAE3074877500093FF3 /* XCLocalSwiftPackageReference "Packages/GraptionAudio" */,
 				6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "Packages/GraptionUI" */,
 				19DABF97307713050033A27A /* XCRemoteSwiftPackageReference "mediapipe" */,
+				19DABF9C307713050033A27A /* XCLocalSwiftPackageReference "Packages/GraptionVision" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9835CFA2306C55A900F6C1EC /* Products */;
@@ -396,6 +400,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/GraptionUI;
 		};
+		19DABF9C307713050033A27A /* XCLocalSwiftPackageReference "Packages/GraptionVision" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/GraptionVision;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -428,6 +436,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 19DABF97307713050033A27A /* XCRemoteSwiftPackageReference "mediapipe" */;
 			productName = MediaPipeTasksVision;
+		};
+		19DABF9D307713050033A27A /* GraptionVision */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GraptionVision;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
