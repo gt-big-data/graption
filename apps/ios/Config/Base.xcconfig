@@ -5,7 +5,8 @@
 DEV_SUFFIX = dev
 PRODUCT_BUNDLE_IDENTIFIER = edu.gatech.graption.$(DEV_SUFFIX)
 
-// Required or iOS kills the app when it requests camera access.
+// Required or iOS kills the app when it requests camera or microphone access.
 INFOPLIST_KEY_NSCameraUsageDescription = Graption uses the camera to see who is speaking.
+INFOPLIST_KEY_NSMicrophoneUsageDescription = Graption uses your microphone to detect speech and provide live captions.
 
 #include? "Local.xcconfig"
