@@ -109,7 +109,7 @@ public struct LiveCaptionScreen: View {
                         Text("\(calibrationCount)")
                             .font(.system(size: 120, weight: .bold, design: .rounded))
                             .monospacedDigit()
-                            .foregroundStyle(Color.graptionAccent)
+                            .foregroundStyle(.white)
                             .contentTransition(.numericText())
                         Text("Keep the room quiet")
                             .font(.title3.bold())
