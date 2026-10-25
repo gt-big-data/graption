@@ -7,16 +7,25 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		65CCECB03074877500093FF3 /* GraptionAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 65CCECAF3074877500093FF3 /* GraptionAudio */; };
 		19DABF99307713050033A27A /* MediaPipeTasksAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF98307713050033A27A /* MediaPipeTasksAudio */; };
 		19DABF9B307713050033A27A /* MediaPipeTasksVision in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF9A307713050033A27A /* MediaPipeTasksVision */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		65CCECB13074998900093FF3 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		65CCECB23074998900093FF3 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
+		65CCECB33074998900093FF3 /* Local.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text; path = Local.xcconfig.example; sourceTree = "<group>"; };
 		9835CFA1306C55A900F6C1EC /* Graption.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Graption.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9835CFB0306C55AA00F6C1EC /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Base.xcconfig; path = Config/Base.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		65CCEC8E30746DA700093FF3 /* GraptionAudio */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = GraptionAudio;
+			sourceTree = "<group>";
+		};
 		9835CFA3306C55A900F6C1EC /* Graption */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Graption;
@@ -28,6 +37,7 @@
 		9835CF9E306C55A900F6C1EC /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				65CCECB03074877500093FF3 /* GraptionAudio in Frameworks */,
 				19DABF9B307713050033A27A /* MediaPipeTasksVision in Frameworks */,
 				19DABF99307713050033A27A /* MediaPipeTasksAudio in Frameworks */,
 			);
@@ -35,12 +45,32 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		65CCEC8D30746D9400093FF3 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				65CCEC8E30746DA700093FF3 /* GraptionAudio */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		65CCECB43074998900093FF3 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				65CCECB13074998900093FF3 /* Base.xcconfig */,
+				65CCECB23074998900093FF3 /* Local.xcconfig */,
+				65CCECB33074998900093FF3 /* Local.xcconfig.example */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
 		9835CF98306C55A900F6C1EC = {
 			isa = PBXGroup;
 			children = (
+				65CCECB43074998900093FF3 /* Config */,
 				9835CFA3306C55A900F6C1EC /* Graption */,
 				9835CFB0306C55AA00F6C1EC /* Base.xcconfig */,
 				9835CFA2306C55A900F6C1EC /* Products */,
+				65CCEC8D30746D9400093FF3 /* Packages */,
 			);
 			sourceTree = "<group>";
 		};
@@ -70,6 +100,7 @@
 			);
 			name = Graption;
 			packageProductDependencies = (
+				65CCECAF3074877500093FF3 /* GraptionAudio */,
 				19DABF98307713050033A27A /* MediaPipeTasksAudio */,
 				19DABF9A307713050033A27A /* MediaPipeTasksVision */,
 			);
@@ -102,6 +133,7 @@
 			mainGroup = 9835CF98306C55A900F6C1EC;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				65CCECAE3074877500093FF3 /* XCLocalSwiftPackageReference "Packages/GraptionAudio" */,
 				19DABF97307713050033A27A /* XCRemoteSwiftPackageReference "mediapipe" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -256,12 +288,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3YY3J39NJ8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Graption needs camera access to analyze your face.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Graption uses your microphone to detect speech and provide live captions.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -276,6 +310,7 @@
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = edu.gatech.graption.aarush;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -292,12 +327,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3YY3J39NJ8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Graption needs camera access to analyze your face.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Graption uses your microphone to detect speech and provide live captions.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -312,6 +349,7 @@
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = edu.gatech.graption.aarush;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -343,6 +381,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		65CCECAE3074877500093FF3 /* XCLocalSwiftPackageReference "Packages/GraptionAudio" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/GraptionAudio;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		19DABF97307713050033A27A /* XCRemoteSwiftPackageReference "mediapipe" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -355,6 +400,10 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		65CCECAF3074877500093FF3 /* GraptionAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GraptionAudio;
+		};
 		19DABF98307713050033A27A /* MediaPipeTasksAudio */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 19DABF97307713050033A27A /* XCRemoteSwiftPackageReference "mediapipe" */;
