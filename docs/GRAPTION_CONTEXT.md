@@ -268,14 +268,15 @@ Must match `ml/common/features.py` exactly: same order, same normalization. It p
   reset, or calibration; never emit an idle-only segment. This cannot recover speech
   missed entirely by the energy threshold.
 - Start energy-based, then switch to Silero.
-- Development demo supports manual room-noise calibration while caption capture is stopped:
-  collect at least 2 seconds without speaking; threshold = max(0.001, 2 × the
-  90th-percentile RMS of fixed 20 ms windows). Use at most the first 30 seconds;
-  retain the previous threshold on insufficient data. Calibration emits no segments,
-  stores no audio, and applies only for the current app instance. This provisional
-  energy heuristic can miss quiet speech and does not distinguish speech from noise.
+- Tapping listen calibrates automatically for 3 seconds. A centered countdown says "Calibrating",
+  shows 3, 2, 1, and "Keep the room quiet", then captions start. Threshold = max(0.001, 2 × the 90th-percentile RMS of fixed 20 ms windows)
+  from that stretch. At least 2 seconds of audio are required; otherwise the previous threshold
+  is kept. Calibration emits no segments, stores no audio, and applies only for the current app
+  instance. This provisional energy heuristic can miss quiet speech and does not distinguish
+  speech from noise.
 
 **WhisperKit**
+- First launch with no local model shows a blank Install base.en page that says Wi-Fi is needed. Later launches load the local copy and caption offline.
 - Transcribes each segment with word timestamps enabled.
 - Emits a `caption` with `speaker_id` pending.
 - Stretch goal: streaming partial captions.

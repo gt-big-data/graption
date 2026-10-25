@@ -1,9 +1,9 @@
 import SwiftUI
 import GraptionAudio
+import GraptionUI
 
 @MainActor
 struct ContentView: View {
-    @State private var showCamera = false
     @State private var capture: MicrophoneCapture?
     @State private var soundAlertModel = SoundAlertModel()
     @State private var hasPrintedLabels = false
@@ -11,94 +11,57 @@ struct ContentView: View {
     @State private var pipeline = CaptionPipeline()
     @State private var isRecording = false
     @State private var isCalibrating = false
+    @State private var calibrationCount: Int?
     @State private var isStarting = false
     @State private var threshold: Float = 0.001
     @State private var isPreparing = false
     @State private var isReady = false
-    @State private var status = "Set up the model before recording"
+    @State private var status = "Loading base.en…"
+    @State private var setupFailed = false
     @State private var captions: [CaptionEntry] = []
+    @State private var listenTask: Task<Void, Never>?
+
+    private var canListen: Bool {
+        capture != nil && isReady && !isPreparing && !isCalibrating && !isStarting
+    }
+
+    /// Newest three captions, oldest on the left, matching the three-bubble layout.
+    private var bubbleCaptions: [LiveCaption] {
+        captions.prefix(3).reversed().map { entry in
+            LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text)
+        }
+    }
+
+    private var bannerAlert: GraptionUI.SoundAlert? {
+        guard let alert = soundAlertModel.currentAlert else { return nil }
+        return GraptionUI.SoundAlert(message: SoundAlertBanner.title(for: alert.label))
+    }
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text(status)
-                Spacer()
-                Button {
-                    showCamera = true
-                } label: {
-                    Label("Camera", systemImage: "camera.fill")
-                }
-                .buttonStyle(.bordered)
-                // Keep camera and microphone demos separate during capture.
-                .disabled(isRecording || isCalibrating || isStarting)
-            }
-            if !isReady {
-                Button("Set up base.en (first time needs internet)") {
+        Group {
+            if isReady {
+                LiveCaptionScreen(
+                    cameraPreviewDestination: { AnyView(CameraView()) },
+                    captions: bubbleCaptions,
+                    soundAlert: bannerAlert,
+                    isListening: isRecording || isCalibrating,
+                    canListen: canListen,
+                    statusText: status,
+                    onMicrophone: {
+                        if isRecording || isCalibrating {
+                            stopListening()
+                        } else {
+                            listenTask = Task { await listen() }
+                        }
+                    },
+                    calibrationCount: calibrationCount,
+                    isSettingUp: isPreparing
+                )
+            } else {
+                InstallBaseEnPage(isInstalling: isPreparing, detail: setupFailed ? status : nil) {
                     Task { await prepareModel(allowDownload: true) }
                 }
-                .disabled(isPreparing)
             }
-            Text(String(format: "Noise threshold: %.4f", threshold))
-                .font(.caption)
-            Text("Calibrate with at least 2 seconds of room noise, without speaking.")
-                .font(.caption)
-            Button {
-                if isCalibrating {
-                    finishCalibration()
-                } else {
-                    Task { await startCalibration() }
-                }
-            } label: {
-                Label(
-                    isCalibrating ? "Stop calibration" : "Calibrate room noise",
-                    systemImage: isCalibrating ? "stop.fill" : "waveform"
-                )
-                .font(.title2.bold())
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(capture == nil || isRecording || isStarting || isPreparing)
-
-            Button {
-                if isRecording {
-                    stopCapture()
-                } else {
-                    Task { await startCapture() }
-                }
-            } label: {
-                Label(
-                    isRecording ? "Stop listening" : "Start listening",
-                    systemImage: isRecording ? "stop.fill" : "mic.fill"
-                )
-                .font(.title2.bold())
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(capture == nil || !isReady || isPreparing || isCalibrating || isStarting)
-
-            if let alert = soundAlertModel.currentAlert {
-                SoundAlertBanner(alert: alert)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    if captions.isEmpty {
-                        Text("No captions yet")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    ForEach(captions) { caption in
-                        CaptionCard(caption: caption)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding()
-        .fullScreenCover(isPresented: $showCamera) {
-            CameraView()
         }
         .animation(.default, value: soundAlertModel.currentAlert?.id)
         .sensoryFeedback(.warning, trigger: soundAlertModel.currentAlert?.id) { _, new in
@@ -123,6 +86,7 @@ struct ContentView: View {
         }
         .onDisappear {
             isVisible = false
+            listenTask?.cancel()
             capture?.onSegment = nil
             capture?.onSoundAlert = nil
             capture?.stop()
@@ -130,6 +94,7 @@ struct ContentView: View {
             pipeline.reset()
             isRecording = false
             isCalibrating = false
+            calibrationCount = nil
         }
     }
 
@@ -190,17 +155,26 @@ struct ContentView: View {
         guard !isPreparing else { return }
         isPreparing = true
         defer { isPreparing = false }
-        status = allowDownload ? "Setting up base.en…" : "Loading local base.en…"
+        status = "Loading base.en…"
         do {
             try await pipeline.prepare(allowDownload: allowDownload)
             isReady = pipeline.isReady
-            status = "Ready"
+            setupFailed = !isReady
+            status = isReady ? "Ready" : "Could not load base.en"
         } catch {
-            report(error)
+            let missing = (error as? TranscriberError) == .modelNotProvisioned
+            setupFailed = allowDownload || !missing
+            if missing, !allowDownload {
+                status = "Wi-Fi is needed"
+            } else {
+                report(error)
+            }
         }
     }
 
-    private func startCalibration() async {
+    /// Quiet stretch before captions. The detector needs 2 seconds of audio;
+    /// 3 seconds leaves room for the microphone to start.
+    private func listen() async {
         guard let capture else { return }
         guard !isRecording, !isCalibrating, !isStarting else { return }
         isStarting = true
@@ -212,37 +186,33 @@ struct ContentView: View {
         guard !Task.isCancelled, isVisible else { return }
         pipeline.reset()
         soundAlertModel.clear()
+        captions.removeAll()
         do {
             try capture.start(calibrating: true)
-            isCalibrating = true
-            status = "Calibrating room noise… do not speak"
         } catch {
             report(error)
+            return
         }
-    }
-
-    private func finishCalibration() {
-        guard let capture else { return }
+        isCalibrating = true
+        status = "Keep the room quiet"
+        for count in [3, 2, 1] {
+            guard !Task.isCancelled, isVisible, isCalibrating else { return }
+            calibrationCount = count
+            do {
+                try await Task.sleep(for: .seconds(1))
+            } catch {
+                return
+            }
+        }
+        guard !Task.isCancelled, isVisible, isCalibrating else { return }
+        calibrationCount = nil
         isCalibrating = false
         do {
             threshold = try capture.stopCalibration()
-            status = "Calibration complete"
             print(String(format: "Calibrated RMS threshold: %.6f", threshold))
         } catch {
+            capture.stop()
             report(error)
-        }
-    }
-
-    private func startCapture() async {
-        guard let capture else { return }
-        guard !isRecording, !isCalibrating, !isStarting else { return }
-        isStarting = true
-        defer { isStarting = false }
-        pipeline.reset()
-        soundAlertModel.clear()
-        captions.removeAll()
-        guard await capture.requestPermission() else {
-            status = "Microphone permission denied"
             return
         }
         guard !Task.isCancelled, isVisible else { return }
@@ -255,12 +225,16 @@ struct ContentView: View {
         }
     }
 
-    private func stopCapture() {
-        // Normal Stop lets the final flushed segment finish transcription.
+    private func stopListening() {
+        let wasCalibrating = isCalibrating
+        isCalibrating = false
+        calibrationCount = nil
         isRecording = false
+        listenTask?.cancel()
+        listenTask = nil
         capture?.stop()
         soundAlertModel.clear()
-        status = "Stopped; finishing pending captions"
+        status = wasCalibrating ? "Ready" : "Stopped; finishing pending captions"
     }
 
     private func printKnownLabelsOnce() {
@@ -278,6 +252,40 @@ struct ContentView: View {
 }
 
 
+private struct InstallBaseEnPage: View {
+    var isInstalling: Bool
+    var detail: String?
+    var install: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color(red: 11 / 255, green: 31 / 255, blue: 59 / 255)
+                .ignoresSafeArea()
+            VStack(spacing: 20) {
+                Text("Install base.en")
+                    .font(.largeTitle.bold())
+                    .foregroundStyle(Color(red: 1, green: 149 / 255, blue: 0))
+                Text("Wi-Fi is needed")
+                    .font(.title3)
+                    .foregroundStyle(.white)
+                if let detail, detail != "Wi-Fi is needed" {
+                    Text(detail)
+                        .font(.body)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                Button(isInstalling ? "Installing…" : "Install") {
+                    install()
+                }
+                .disabled(isInstalling)
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 1, green: 149 / 255, blue: 0))
+            }
+            .padding(32)
+        }
+    }
+}
+
 /// Presentation data only; the transcription/event contracts are unchanged.
 private struct CaptionEntry: Identifiable {
     let result: TranscriptionResult
@@ -286,37 +294,3 @@ private struct CaptionEntry: Identifiable {
     var id: UUID { result.captionID }
 }
 
-private struct CaptionCard: View {
-    let caption: CaptionEntry
-    // Every row uses the same time-column width, scaled with Dynamic Type.
-    @ScaledMetric(relativeTo: .caption2) private var timeColumnWidth: CGFloat = 52
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(String(format: "%.2f s", caption.result.tStart))
-                Text(String(format: "%.2f s", caption.result.tEnd))
-            }
-                .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(.white.opacity(0.8))
-                .frame(width: timeColumnWidth, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(caption.text)
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .textSelection(.enabled)
-                Text(String(format: "Transcription latency: %.2f s", caption.transcriptionSeconds))
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.8))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(white: 0.10), in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .combine)
-    }
-}
