@@ -5,18 +5,21 @@ struct BottomControlsBar: View {
     var canListen = true
     var onMicrophone: () -> Void = {}
 
+    /// Same light blue as the "Stopped; finishing pending captions" status.
+    private let buttonBlue = Color.graptionSecondaryText
+
     var body: some View {
         HStack(spacing: 12) {
             Button(action: onMicrophone) {
                 Image(systemName: isListening ? "stop.fill" : "mic.fill")
                     .font(.system(size: 24))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(buttonBlue)
                     .frame(width: 56, height: 56)
                     .background(
-                        isListening ? Color.white.opacity(0.28) : Color.white.opacity(0.08),
+                        isListening ? buttonBlue.opacity(0.28) : Color.white.opacity(0.08),
                         in: Circle()
                     )
-                    .overlay(Circle().stroke(.white, lineWidth: 1))
+                    .overlay(Circle().stroke(buttonBlue, lineWidth: 1))
             }
             .disabled(!canListen && !isListening)
             .accessibilityLabel(isListening ? "Stop listening" : "Start listening")
@@ -30,21 +33,21 @@ struct BottomControlsBar: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(buttonBlue)
                 .frame(maxWidth: .infinity)
                 .frame(height: 56)
                 .background(Color.white.opacity(0.08), in: Capsule())
-                .overlay(Capsule().stroke(.white, lineWidth: 1))
+                .overlay(Capsule().stroke(buttonBlue, lineWidth: 1))
             }
             .accessibilityLabel("Transcript")
 
             Button {} label: {
                 Image(systemName: "speaker.wave.2.fill")
                     .font(.system(size: 20))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(buttonBlue)
                     .frame(width: 56, height: 56)
                     .background(Color.white.opacity(0.08), in: Circle())
-                    .overlay(Circle().stroke(.white, lineWidth: 1))
+                    .overlay(Circle().stroke(buttonBlue, lineWidth: 1))
             }
             .accessibilityLabel("Volume")
         }
