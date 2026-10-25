@@ -37,7 +37,7 @@ Last Whisper word timing is a model estimate, not independently verified speech 
 1. Record device model, iOS version, app commit, WhisperKit/model versions, and whether
    this is the team's oldest supported phone. Record quiet/noisy conditions and VAD
    threshold (currently 0.001).
-2. Use the setup button online once to obtain model and tokenizer assets. Setup/loading
+2. On first launch, open the Install base.en page on Wi-Fi and install the model. Setup/loading
    time is separate from caption latency. Record its duration separately if desired.
 3. Force quit, enable airplane mode with Wi-Fi off, relaunch, and verify local model
    loading and captions. This tests cold-start offline readiness, not merely reuse of
