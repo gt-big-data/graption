@@ -164,6 +164,8 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     let session = AVCaptureSession()
     /// Called on the video queue after every processed frame, with that frame's pixel size.
     var onFaces: (([FaceTrack], CGSize) -> Void)?
+    private var cameraPosition: AVCaptureDevice.Position = .back
+    private var videoRotationAngle: CGFloat = 90
 
     private let sessionQueue = DispatchQueue(label: "com.graption.camera.session")
     // Frames are processed synchronously here. With alwaysDiscardsLateVideoFrames, frames that
@@ -189,7 +191,7 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         self.landmarkMode = landmarkMode
     }
 
-    // Back camera, up to 1080p, 15 fps
+    // Back camera by default, up to 1080p, 15 fps. Flip switches to the front camera.
     func start(completion: @escaping @Sendable (Bool) -> Void) {
         sessionQueue.async { [self] in
             if !session.inputs.isEmpty {
@@ -217,14 +219,50 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     /// MediaPipe however the phone is held.
     func setVideoRotationAngle(_ angle: CGFloat) {
         sessionQueue.async { [self] in
-            guard let connection = videoOutput.connection(with: .video),
-                  connection.isVideoRotationAngleSupported(angle),
-                  connection.videoRotationAngle != angle else { return }
-            connection.videoRotationAngle = angle
+            let changed = videoRotationAngle != angle
+            videoRotationAngle = angle
+            applyVideoConnectionSettings()
             // Existing tracks are in the old orientation's coordinates.
+            guard changed else { return }
             videoQueue.async { [self] in
                 trackedFaces.removeAll()
             }
+        }
+    }
+
+    /// Swaps the capture device. The front camera is mirrored so boxes match the selfie preview.
+    func switchCamera(to position: AVCaptureDevice.Position, completion: @escaping @Sendable (Bool) -> Void) {
+        sessionQueue.async { [self] in
+            guard position != cameraPosition,
+                  let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position),
+                  let input = try? AVCaptureDeviceInput(device: device) else {
+                completion(false)
+                return
+            }
+
+            session.beginConfiguration()
+            let previousInputs = session.inputs
+            for existing in previousInputs {
+                session.removeInput(existing)
+            }
+            guard session.canAddInput(input) else {
+                for existing in previousInputs where session.canAddInput(existing) {
+                    session.addInput(existing)
+                }
+                session.commitConfiguration()
+                completion(false)
+                return
+            }
+            session.addInput(input)
+            cameraPosition = position
+            applyVideoConnectionSettings()
+            session.commitConfiguration()
+            configureCamera(for: device, fps: 15)
+            videoQueue.async { [self] in
+                trackedFaces.removeAll()
+                publishedEmpty = false
+            }
+            completion(true)
         }
     }
 
@@ -297,10 +335,7 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
 
         // Start in portrait; the preview's rotation coordinator updates this via
         // setVideoRotationAngle so Vision, MediaPipe, and the preview share one frame.
-        if let connection = videoOutput.connection(with: .video),
-           connection.isVideoRotationAngleSupported(90) {
-            connection.videoRotationAngle = 90
-        }
+        applyVideoConnectionSettings()
 
         configureCamera(for: device, fps: 15)
         return true
@@ -569,6 +604,23 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
 
     // MARK: Camera
 
+    /// Rotation and mirroring are set on the analyzed frames, not only the preview.
+    /// The front camera is mirrored so a box on the left of the selfie view is the left cheek.
+    private func applyVideoConnectionSettings() {
+        guard let connection = videoOutput.connection(with: .video) else { return }
+        if connection.isVideoRotationAngleSupported(videoRotationAngle),
+           connection.videoRotationAngle != videoRotationAngle {
+            connection.videoRotationAngle = videoRotationAngle
+        }
+        if connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            let mirrored = cameraPosition == .front
+            if connection.isVideoMirrored != mirrored {
+                connection.isVideoMirrored = mirrored
+            }
+        }
+    }
+
     private func configureCamera(for device: AVCaptureDevice, fps: Double) {
         do {
             try device.lockForConfiguration()
@@ -606,8 +658,10 @@ final class CameraController: ObservableObject {
 
     @Published private(set) var status: Status = .notDetermined
     @Published private(set) var faces: [FaceTrack] = []
+    @Published private(set) var cameraPosition: AVCaptureDevice.Position = .back
     /// Width / height of the analyzed frames; flips when the phone rotates.
     @Published private(set) var captureAspectRatio: CGFloat = 9.0 / 16.0
+    private var isSwitchingCamera = false
 
     // Landmark mode for the whole app. Currently .faceCrops; change to .fullFrame to switch.
     // ASD training extraction must use the same mode (GRAPTION_CONTEXT.md §6).
@@ -655,6 +709,21 @@ final class CameraController: ObservableObject {
         engine.setVideoRotationAngle(angle)
     }
 
+    func flipCamera() {
+        guard status == .running, !isSwitchingCamera else { return }
+        isSwitchingCamera = true
+        let next: AVCaptureDevice.Position = cameraPosition == .back ? .front : .back
+        engine.switchCamera(to: next) { [weak self] success in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isSwitchingCamera = false
+                guard success else { return }
+                self.cameraPosition = next
+                self.faces = []
+            }
+        }
+    }
+
     private func startEngine() {
         engine.start { [weak self] success in
             DispatchQueue.main.async {
@@ -666,6 +735,7 @@ final class CameraController: ObservableObject {
 
 private struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    let cameraPosition: AVCaptureDevice.Position
     /// Called on the main thread with the preview's rotation angle whenever it changes.
     let onRotationAngle: (CGFloat) -> Void
 
@@ -674,22 +744,46 @@ private struct CameraPreview: UIViewRepresentable {
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
         view.onRotationAngle = onRotationAngle
+        view.setCameraPosition(cameraPosition)
         return view
     }
 
-    func updateUIView(_ uiView: PreviewView, context: Context) {}
+    func updateUIView(_ uiView: PreviewView, context: Context) {
+        uiView.setCameraPosition(cameraPosition)
+    }
 
     final class PreviewView: UIView {
         override static var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
         var onRotationAngle: ((CGFloat) -> Void)?
+        private var cameraPosition: AVCaptureDevice.Position = .back
         private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
         private var rotationObservation: AnyCancellable?
 
+        func setCameraPosition(_ position: AVCaptureDevice.Position) {
+            let changed = cameraPosition != position
+            cameraPosition = position
+            applyMirroring()
+            guard changed else { return }
+            rotationObservation?.cancel()
+            rotationObservation = nil
+            rotationCoordinator = nil
+            attachCoordinator()
+        }
+
         // The coordinator reads the interface orientation from the layer's window, so start
-        // observing once the view is on screen.
+        // observing once the view is on screen. A camera flip binds the coordinator to the new device.
         override func didMoveToWindow() {
             super.didMoveToWindow()
+            attachCoordinator()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            applyMirroring()
+        }
+
+        private func attachCoordinator() {
             guard window != nil, rotationCoordinator == nil,
                   let device = (previewLayer.session?.inputs.first as? AVCaptureDeviceInput)?.device else { return }
             let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
@@ -698,12 +792,23 @@ private struct CameraPreview: UIViewRepresentable {
                 .publisher(for: \.videoRotationAngleForHorizonLevelPreview)
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] angle in self?.applyRotation(angle) }
+            applyRotation(coordinator.videoRotationAngleForHorizonLevelPreview)
+        }
+
+        private func applyMirroring() {
+            guard let connection = previewLayer.connection, connection.isVideoMirroringSupported else { return }
+            connection.automaticallyAdjustsVideoMirroring = false
+            let mirrored = cameraPosition == .front
+            if connection.isVideoMirrored != mirrored {
+                connection.isVideoMirrored = mirrored
+            }
         }
 
         private func applyRotation(_ angle: CGFloat) {
             if let connection = previewLayer.connection, connection.isVideoRotationAngleSupported(angle) {
                 connection.videoRotationAngle = angle
             }
+            applyMirroring()
             onRotationAngle?(angle)
         }
     }
@@ -723,6 +828,7 @@ struct CameraView: View {
                         ZStack {
                             CameraPreview(
                                 session: controller.session,
+                                cameraPosition: controller.cameraPosition,
                                 onRotationAngle: controller.setVideoRotationAngle
                             )
                             .ignoresSafeArea()
@@ -775,6 +881,20 @@ struct CameraView: View {
             .padding(.top, 12)
             .padding(.leading, 16)
             .tint(.white)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if controller.status == .running {
+                Button(action: controller.flipCamera) {
+                    Image(systemName: "arrow.triangle.2.circlepath.camera")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 52, height: 52)
+                        .background(.black.opacity(0.45), in: Circle())
+                }
+                .padding(.trailing, 16)
+                .padding(.bottom, 16)
+                .accessibilityLabel(controller.cameraPosition == .back ? "Use selfie camera" : "Use back camera")
+            }
         }
         .onAppear { controller.start() }
         .onDisappear { controller.stop() }
