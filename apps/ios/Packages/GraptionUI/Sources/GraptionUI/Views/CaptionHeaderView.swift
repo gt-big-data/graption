@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct CaptionHeaderView: View {
+    var subtitle = "Graption • Live camera"
     var onBack: () -> Void = {}
     var onSettings: () -> Void = {}
 
@@ -14,7 +15,7 @@ struct CaptionHeaderView: View {
                     .foregroundStyle(Color.graptionAccent)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
-                Text("Graption • Live camera")
+                Text(subtitle)
                     .font(.footnote)
                     .foregroundStyle(Color.graptionSecondaryText)
                     .lineLimit(1)

@@ -1,17 +1,25 @@
 import SwiftUI
 
 struct BottomControlsBar: View {
+    var isListening = false
+    var canListen = true
+    var onMicrophone: () -> Void = {}
+
     var body: some View {
         HStack(spacing: 12) {
-            Button {} label: {
-                Image(systemName: "mic.fill")
+            Button(action: onMicrophone) {
+                Image(systemName: isListening ? "stop.fill" : "mic.fill")
                     .font(.system(size: 24))
                     .foregroundStyle(Color.graptionAccent)
                     .frame(width: 56, height: 56)
-                    .background(Color.white.opacity(0.08), in: Circle())
+                    .background(
+                        isListening ? Color.graptionAccent.opacity(0.35) : Color.white.opacity(0.08),
+                        in: Circle()
+                    )
                     .overlay(Circle().stroke(Color.graptionAccent, lineWidth: 1))
             }
-            .accessibilityLabel("Microphone")
+            .disabled(!canListen && !isListening)
+            .accessibilityLabel(isListening ? "Stop listening" : "Start listening")
 
             Button {} label: {
                 HStack(spacing: 8) {

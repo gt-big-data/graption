@@ -12,26 +12,34 @@ struct CaptionBubbleView: View {
             if let tag = caption.toneTag {
                 Text(tag)
                     .font(.caption.bold())
-                    .foregroundStyle(Color.graptionAccent)
-                    .padding(.horizontal, 6)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.08), in: Capsule())
+                    .background(.white.opacity(0.16), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.5))
                     .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
             }
 
             Text(caption.text)
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(Color.graptionAccent)
+                .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(10)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.graptionBubble)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.black.opacity(0.22))
+                }
+        }
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.graptionAccent, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(.white.opacity(0.35), lineWidth: 0.75)
         )
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
         .animation(.easeOut(duration: 0.25), value: caption.toneTag)
     }
 }
