@@ -76,18 +76,29 @@ final class FaceTrackerTests: XCTestCase {
         XCTAssertEqual(ids(tracker.update(with: [face(0.41, 0.4)], at: 0.6)), ["f1"])
     }
 
-    func testTrackRetiredAfterOneSecondUnseen() {
+    func testBoxGoneForTwoSecondsKeepsID() {
         var tracker = FaceTracker()
         _ = tracker.update(with: [face(0.4, 0.4)], at: 0)
-        _ = tracker.update(with: [], at: 1.05)
-        XCTAssertEqual(ids(tracker.update(with: [face(0.4, 0.4)], at: 1.1)), ["f2"])
+        // head turns to profile: box narrows and shifts then detection is lost.
+        _ = tracker.update(with: [FaceMeasurement(box: CGRect(x: 0.45, y: 0.4, width: 0.1, height: 0.2))], at: frame)
+        var time = 2 * frame
+        while time < 2 + frame { _ = tracker.update(with: [], at: time); time += frame }
+        // a full 2 s after it was last seen the face turns back.
+        XCTAssertEqual(ids(tracker.update(with: [face(0.4, 0.4)], at: 2 + frame)), ["f1"])
+    }
+
+    func testTrackRetiredAfterTwoSecondsUnseen() {
+        var tracker = FaceTracker()
+        _ = tracker.update(with: [face(0.4, 0.4)], at: 0)
+        _ = tracker.update(with: [], at: 2.05)
+        XCTAssertEqual(ids(tracker.update(with: [face(0.4, 0.4)], at: 2.1)), ["f2"])
     }
 
     func testIDsAreNeverReusedWithinASession() {
         var tracker = FaceTracker()
         _ = tracker.update(with: [face(0.1, 0.1), face(0.6, 0.6)], at: 0)
-        _ = tracker.update(with: [], at: 2)
-        XCTAssertEqual(ids(tracker.update(with: [face(0.1, 0.1)], at: 2.1)), ["f3"])
+        _ = tracker.update(with: [], at: 4)
+        XCTAssertEqual(ids(tracker.update(with: [face(0.1, 0.1)], at: 4.1)), ["f3"])
     }
 
     func testResetStartsANewSession() {

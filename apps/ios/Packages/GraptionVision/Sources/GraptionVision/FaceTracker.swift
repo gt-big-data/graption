@@ -50,13 +50,15 @@ public struct FaceTrack: Identifiable, Sendable, Equatable {
 /// so stale boxes don't linger on screen.
 ///
 /// changes from the v2 tracker: iou pass added. ids are strings not ints.
-/// tracks live 1 s instead of being dropped after 2 missed frames.
+/// tracks live 2 s instead of being dropped after 2 missed frames.
 public struct FaceTracker: Sendable {
     public var minIoU: CGFloat = 0.3
     /// center distance limit as a multiple of the track's larger side.
     public var maxCenterDistance: CGFloat = 1.5
     /// seconds a track survives without a match before its id is retired.
-    public var maxUnseen: Double = 1.0
+    /// 2 s not 1 s so a face can turn away and back without a new id (on device test).
+    /// tradeoff: someone new stepping into that spot within 2 s inherits the id.
+    public var maxUnseen: Double = 2.0
     /// missed frames during which a track is still published at its predicted spot.
     public var maxCoastFrames = 2
 

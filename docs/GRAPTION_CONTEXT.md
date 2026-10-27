@@ -242,10 +242,10 @@ For now the app has two ways to get landmarks, chosen by `LandmarkMode`. **`face
 **FaceTracker** (`GraptionVision/FaceTracker.swift`, unit-tested with `swift test`)
 - Greedy IoU matching of the current frame's faces to existing tracks (IoU ≥ 0.3), then a centroid-distance fallback (within 1.5× the face size) for fast movers.
 - Boxes are smoothed with a One Euro filter. A missed face coasts on its last velocity and is still shown for 2 frames, without landmarks.
-- Drop a track after 1s unseen; until then a returning face gets its old ID back. IDs are `f1`, `f2`, … per session, never reused; they restart when the camera stops. Rotating the phone forgets all tracks (their boxes are in the old orientation), so faces get new IDs.
+- Drop a track after 2s unseen; until then a returning face gets its old ID back. (Was 1s; on-device testing showed turning the head away and back often takes longer, and the face came back with a new ID. Tradeoff: someone new stepping into the same spot within 2s inherits the ID.) IDs are `f1`, `f2`, … per session, never reused; they restart when the camera stops. Rotating the phone forgets all tracks (their boxes are in the old orientation), so faces get new IDs.
 
 **Speaker guess (until SpeakerModel ships)**
-- `LargestFaceScorer` implements the `SpeakerScorer` protocol: the largest face gets `p = 1`, the rest `0`. The Core ML model replaces it behind the same protocol.
+- `LargestFaceScorer` implements the `SpeakerScorer` protocol: the largest face gets `p = 1`, the rest `0`. The camera view labels that face "talking" and draws it green. The Core ML model replaces it behind the same protocol.
 
 **FeatureBuilder**
 Must match `ml/common/features.py` exactly: same order, same normalization. It produces one vector per face per frame:

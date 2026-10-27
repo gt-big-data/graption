@@ -790,7 +790,8 @@ private struct FaceBox: View {
                 height: box.height * renderedHeight
             )
             .overlay(alignment: .topLeading) {
-                Text(id)
+                // v3. spell out the guess since green alone was hard to read on device.
+                Text(isSpeaker ? "\(id) talking" : id)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.black)
                     .padding(.horizontal, 4)
