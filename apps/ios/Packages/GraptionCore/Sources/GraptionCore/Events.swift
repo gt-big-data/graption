@@ -5,7 +5,7 @@
 
 import Foundation
 
-/// Graption event contract v1.1 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds
+/// Graption event contract v1.2 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds
 /// since session start on the phone's monotonic host clock. Changing this file = bump
 /// schema_version and regenerate Pydantic + Swift types.
 ///
@@ -36,8 +36,7 @@ struct Events: Codable {
     let modelVersions: [String: String]?
     /// Face id chosen by fusion, or "unknown" (off-screen/ambiguous; shown as "Someone").
     let speakerID: String?
-    let tEnd: Double?
-    let tStart: Double?
+    let tEnd, tStart: Double?
     let text: String?
     let confidence: Double?
     let label: String?
@@ -49,39 +48,32 @@ struct Events: Codable {
     let latencyMS: [String: Double]?
     let modelVersion: String?
     let probs: Probs?
+    let scores: Scores?
     let tag: String?
-    let code: String?
-    let message: String?
+    let code, message: String?
     /// Exact received text, or base64 for an unsupported binary frame. May contain audio: never
     /// store or log.
     let request: String?
     let requestEncoding: RequestEncoding?
 
     enum CodingKeys: String, CodingKey {
-        case faces = "faces"
+        case faces
         case schemaVersion = "schema_version"
         case sessionID = "session_id"
-        case t = "t"
-        case type = "type"
+        case t, type
         case captionID = "caption_id"
         case modelVersions = "model_versions"
         case speakerID = "speaker_id"
         case tEnd = "t_end"
         case tStart = "t_start"
-        case text = "text"
-        case confidence = "confidence"
-        case label = "label"
+        case text, confidence, label
         case audioB64 = "audio_b64"
         case sampleRate = "sample_rate"
-        case caption = "caption"
+        case caption
         case toneTag = "tone_tag"
         case latencyMS = "latency_ms"
         case modelVersion = "model_version"
-        case probs = "probs"
-        case tag = "tag"
-        case code = "code"
-        case message = "message"
-        case request = "request"
+        case probs, scores, tag, code, message, request
         case requestEncoding = "request_encoding"
     }
 }
@@ -125,6 +117,7 @@ extension Events {
         latencyMS: [String: Double]?? = nil,
         modelVersion: String?? = nil,
         probs: Probs?? = nil,
+        scores: Scores?? = nil,
         tag: String?? = nil,
         code: String?? = nil,
         message: String?? = nil,
@@ -152,6 +145,7 @@ extension Events {
             latencyMS: latencyMS ?? self.latencyMS,
             modelVersion: modelVersion ?? self.modelVersion,
             probs: probs ?? self.probs,
+            scores: scores ?? self.scores,
             tag: tag ?? self.tag,
             code: code ?? self.code,
             message: message ?? self.message,
@@ -178,8 +172,7 @@ struct CaptionClass: Codable {
     let sessionID: String
     /// Face id chosen by fusion, or "unknown" (off-screen/ambiguous; shown as "Someone").
     let speakerID: String
-    let tEnd: Double
-    let tStart: Double
+    let tEnd, tStart: Double
     let text: String
     let type: CaptionType
 
@@ -191,8 +184,7 @@ struct CaptionClass: Codable {
         case speakerID = "speaker_id"
         case tEnd = "t_end"
         case tStart = "t_start"
-        case text = "text"
-        case type = "type"
+        case text, type
     }
 }
 
@@ -248,7 +240,7 @@ extension CaptionClass {
 }
 
 enum SchemaVersion: String, Codable {
-    case the11 = "1.1"
+    case the12 = "1.2"
 }
 
 enum CaptionType: String, Codable {
@@ -264,9 +256,9 @@ struct EventsSchema: Codable {
     let p: Double
 
     enum CodingKeys: String, CodingKey {
-        case bbox = "bbox"
+        case bbox
         case faceID = "face_id"
-        case p = "p"
+        case p
     }
 }
 
@@ -311,21 +303,8 @@ extension EventsSchema {
 
 // MARK: - Probs
 struct Probs: Codable {
-    let anger: Double
-    let disgust: Double
-    let fear: Double
-    let happy: Double
-    let neutral: Double
-    let sad: Double
-
-    enum CodingKeys: String, CodingKey {
-        case anger = "anger"
-        case disgust = "disgust"
-        case fear = "fear"
-        case happy = "happy"
-        case neutral = "neutral"
-        case sad = "sad"
-    }
+    let anger, disgust, fear, happy: Double
+    let neutral, sad: Double
 }
 
 // MARK: Probs convenience initializers and mutators
@@ -376,6 +355,50 @@ extension Probs {
 enum RequestEncoding: String, Codable {
     case base64 = "base64"
     case text = "text"
+}
+
+// MARK: - Scores
+struct Scores: Codable {
+    let arousal, dominance, valence: Double
+}
+
+// MARK: Scores convenience initializers and mutators
+
+extension Scores {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Scores.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        arousal: Double? = nil,
+        dominance: Double? = nil,
+        valence: Double? = nil
+    ) -> Scores {
+        return Scores(
+            arousal: arousal ?? self.arousal,
+            dominance: dominance ?? self.dominance,
+            valence: valence ?? self.valence
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
 }
 
 enum EventsType: String, Codable {

@@ -19,13 +19,13 @@ Wi-Fi or phone hotspot, the phone connects to
 ## Session protocol
 
 Send JSON text frames matching `schemas/events.schema.json`, including `session_id`
-and `schema_version: "1.1"`. Example sentence audio (PCM16 mono little-endian, base64):
+and `schema_version: "1.2"`. Example sentence audio (PCM16 mono little-endian, base64):
 
 ```json
 {
   "type": "tone_request",
   "session_id": "demo",
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "caption_id": "3f1c2a9e-8b7d-4c6e-9a01-2b3c4d5e6f70",
   "t_start": 1.0,
   "t_end": 1.1,
@@ -44,7 +44,7 @@ Invalid messages receive a `session_error` reply and the connection stays open:
 {
   "type": "session_error",
   "session_id": "demo",
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "code": "invalid_json",
   "message": "Invalid JSON at line 1, column 1: Expecting value",
   "request": "not json",
