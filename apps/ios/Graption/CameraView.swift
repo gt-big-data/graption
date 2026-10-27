@@ -12,6 +12,8 @@ import Combine
 import UIKit
 import Vision
 import MediaPipeTasksVision
+import GraptionUI
+import GraptionCore
 
 nonisolated private struct OneEuroFilter {
     private let minCutoff: Double
@@ -712,6 +714,7 @@ private struct CameraPreview: UIViewRepresentable {
 struct CameraView: View {
     @StateObject private var controller = CameraController()
     @Environment(\.dismiss) private var dismiss
+    var captions: [LiveCaption] = []
 
     var body: some View {
         ZStack {
@@ -732,7 +735,8 @@ struct CameraView: View {
                                     box: face.box,
                                     hasLandmarks: face.hasLandmarks,
                                     size: geometry.size,
-                                    sourceAspectRatio: controller.captureAspectRatio
+                                    sourceAspectRatio: controller.captureAspectRatio,
+                                    color: speakerBoxColor()
                                 )
                             }
 
@@ -793,6 +797,13 @@ struct CameraView: View {
         .foregroundStyle(.white)
         .padding()
     }
+
+    private func speakerBoxColor() -> Color {
+        if let speaker = captions.first?.speakerName {
+            return colorForSpeaker(speaker)
+        }
+        return Color(red: 1.0, green: 0.90, blue: 0.43)
+    }
 }
 
 /// Solid when MediaPipe fit a mesh to the face; dashed when only Vision detected it
@@ -802,6 +813,7 @@ private struct FaceBox: View {
     let hasLandmarks: Bool
     let size: CGSize
     let sourceAspectRatio: CGFloat
+    let color: Color
 
     var body: some View {
         let scale = max(size.width / sourceAspectRatio, size.height)
@@ -811,7 +823,7 @@ private struct FaceBox: View {
         let verticalCrop = (renderedHeight - size.height) / 2
 
         Rectangle()
-            .stroke(.yellow, style: StrokeStyle(lineWidth: 3, dash: hasLandmarks ? [] : [8, 6]))
+            .stroke(color, style: StrokeStyle(lineWidth: 3, dash: hasLandmarks ? [] : [8, 6]))
             .frame(
                 width: box.width * renderedWidth,
                 height: box.height * renderedHeight

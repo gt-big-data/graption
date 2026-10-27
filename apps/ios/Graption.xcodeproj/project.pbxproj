@@ -7,10 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		65CCECB03074877500093FF3 /* GraptionAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 65CCECAF3074877500093FF3 /* GraptionAudio */; };
-		5A863841E58064FDABEE6763 /* GraptionUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1504F8340E9DC8A84ACE6184 /* GraptionUI */; };
 		19DABF99307713050033A27A /* MediaPipeTasksAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF98307713050033A27A /* MediaPipeTasksAudio */; };
 		19DABF9B307713050033A27A /* MediaPipeTasksVision in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF9A307713050033A27A /* MediaPipeTasksVision */; };
+		5A863841E58064FDABEE6763 /* GraptionUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1504F8340E9DC8A84ACE6184 /* GraptionUI */; };
+		65CCECB03074877500093FF3 /* GraptionAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 65CCECAF3074877500093FF3 /* GraptionAudio */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -410,10 +410,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		65CCECAF3074877500093FF3 /* GraptionAudio */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = GraptionAudio;
-		};
 		1504F8340E9DC8A84ACE6184 /* GraptionUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "Packages/GraptionUI" */;
@@ -428,6 +424,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 19DABF97307713050033A27A /* XCRemoteSwiftPackageReference "mediapipe" */;
 			productName = MediaPipeTasksVision;
+		};
+		65CCECAF3074877500093FF3 /* GraptionAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GraptionAudio;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
