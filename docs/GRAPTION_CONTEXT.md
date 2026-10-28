@@ -358,8 +358,9 @@ for caption [t0, t1]:
   replies to each schema-v1.1 `tone_request` with a matching `tone_result`, `tag: null`,
   zero probabilities (no prediction), and `model_version: "tone-stub-v1"` through
   `MockToneBackend`. `caption_log` is accepted and discarded until logging is implemented.
-  Audio stays in memory only. Real inference, SQLite logging, and deployment packaging
-  remain later work; the skeleton always uses the stub regardless of `TONE_BACKEND`.
+  Audio stays in memory only. `TONE_BACKEND=audeering` swaps in the real audEERING baseline
+  (A6, `server/app/audeering.py`); the default is still the stub (`mock`). SQLite logging and
+  deployment packaging remain later work.
   Invalid session messages return `session_error` and keep the connection open. Rejection
   warnings contain only a fixed rejection code, generated connection ID, and backend model version. The response
   echoes the received request to its originating client; it is never stored or logged.
@@ -380,12 +381,14 @@ for caption [t0, t1]:
   3. Learned softmax-weighted sum over the 13 layers, then mean-pool over time, giving a 768-dim vector.
   4. Head: `Linear(768,256) → ReLU → Dropout(0.3) → Linear(256,6) → softmax`.
   5. Tag mapper: `tag = argmax` if `max prob ≥ 0.6` and the argmax isn't `neutral`; otherwise `null`.
-- **Week-1 baseline mode** (`TONE_BACKEND=audeering`): the audEERING model outputs arousal, valence, and dominance in [0,1]. Map them with tunable thresholds:
-  - arousal > 0.65 and valence > 0.55 → `excited`
-  - arousal > 0.65 and valence < 0.4 → `upset`
-  - arousal < 0.3 → `calm`
-  - otherwise `null`
-- **Config (env vars):** `TONE_BACKEND` (`audeering` | `custom`), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only), `TONE_LOG_DIR` (default repo-root `logs/`).
+- **Week-1 baseline mode** (`TONE_BACKEND=audeering`, implemented): the audEERING model outputs arousal, valence, and dominance in [0,1]. Map them with tunable thresholds (`AudeeringThresholds` in `server/app/tone.py`). These are the values tuned on team recordings in A4 (`ml/tone/DISCUSSION_LOG.md`), replacing the original 0.65/0.55/0.4/0.3 guesses:
+  - arousal > 0.64 and valence > 0.45 → `excited`
+  - arousal > 0.47 and valence < 0.4 → `upset`
+  - 0.38 < arousal < 0.48 and valence > 0.45 → `calm`
+  - otherwise `null`; segments under 0.5 s are always `null`
+  - `probs` are all zero in this mode: the schema's 6 emotions don't apply to arousal/valence.
+  - Weights load from the local Hugging Face cache (`uv run hf download audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim`); torch, transformers, and scipy come from the uv workspace (`graption-ml`), not `graption-server`'s own dependencies.
+- **Config (env vars):** `TONE_BACKEND` (`mock` default | `audeering` | `custom` later), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only), `TONE_LOG_DIR` (default repo-root `logs/`).
 - **CPU performance:** the audEERING baseline is the large wav2vec2 variant (~165M params) and may be slow on CPU. Benchmark per-sentence latency on Cloud Run before user testing. If it's over ~1s, use the custom WavLM-base head in cloud mode.
 - **SQLite tables:** `sessions`, `captions` (from `caption_log`), `tone_results` (probs, model_version, latency).
   - Cloud Run disks are ephemeral, so in cloud mode, export the SQLite file to `LOG_EXPORT_BUCKET` at session end.
