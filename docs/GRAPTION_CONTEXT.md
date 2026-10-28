@@ -153,7 +153,7 @@ The repo starts with only READMEs in most folders; each team creates the files a
 All timestamps are **seconds since session start, measured on the phone's monotonic host clock**. Convert camera and audio `CMSampleBuffer` presentation timestamps to host time. The Mac never generates timestamps used for alignment.
 
 ### Event schema (`schemas/events.schema.json`)
-Every event includes `type`, `session_id`, and `schema_version` (currently `"1.1"`).
+Every event includes `type`, `session_id`, and `schema_version` (currently `"1.2"`).
 
 **On-device (Swift types, generated from the schema):**
 ```jsonc
@@ -192,7 +192,7 @@ Every event includes `type`, `session_id`, and `schema_version` (currently `"1.1
 {
   "type": "session_error",
   "session_id": "demo",
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "code": "invalid_json",
   "message": "Invalid JSON at line 1, column 1: Expecting value",
   "request": "not json",
@@ -205,7 +205,7 @@ The connection stays open after request errors, so the client can correct and re
 frames are echoed as base64 with `request_encoding: "base64"`. These replies are sent
 only to the originating client and must never enter server logs or storage. Authentication
 failures still reject the handshake. Version 1.1 adds `session_error`; clients must use
-`schema_version: "1.1"` in all events. Pydantic types live in `server/app/events.py` and
+`schema_version: "1.2"` in all events. Pydantic types live in `server/app/events.py` and
 Swift types in `apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`, generated with
 `npx quicktype@23.2.6 -s schema schemas/events.schema.json --lang swift --top-level Events
 --density normal -o apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`.
