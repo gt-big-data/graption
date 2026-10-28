@@ -207,7 +207,7 @@ only to the originating client and must never enter server logs or storage. Auth
 failures still reject the handshake. Version 1.1 adds `session_error`; clients must use
 `schema_version: "1.1"` in all events. Pydantic types live in `server/app/events.py` and
 Swift types in `apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`, generated with
-`npx quicktype@23.2.6 -s schema schemas/events.schema.json --lang swift --top-level Events
+`npx quicktype@23.2.6 -s schema schemas/events.schema.json --lang swift --top-level Events --access-level public
 --density normal -o apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`.
 
 Base64 JSON is fine for the MVP (~130 KB for a 3s segment). Binary frames are a later optimization.

@@ -6,7 +6,9 @@ template ("Hello, world!"). Mac + Xcode required.
 ## Run it (first time, each developer)
 1. Xcode → **Settings → Accounts** → **+** → sign in with your Apple ID (free is fine).
 2. `cp apps/ios/Config/Local.xcconfig.example apps/ios/Config/Local.xcconfig` and fill in
-   `DEVELOPMENT_TEAM` (your 10-character team ID) and `DEV_SUFFIX` (your name). This file is
+   `DEVELOPMENT_TEAM` (your 10-character team ID) and `DEV_SUFFIX` (your name). Add `TONE_URL`
+   (for example, `ws:/$()/<mac-lan-ip>:8000`; the unusual spelling avoids xcconfig treating `//` as a comment)
+   and `TONE_TOKEN` only when testing the tone server. This file is
    gitignored. It exists because two free Apple IDs can't share one bundle ID.
 3. Open `apps/ios/Graption.xcodeproj`. Pick a simulator and press ⌘R.
 4. On your iPhone: plug in → **Trust** → Settings → Privacy & Security → **Developer Mode** on →

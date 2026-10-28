@@ -6,13 +6,31 @@
 	objectVersion = 110;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A1B2C3D4E5F60708090A0B01 /* GraptionCore in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60708090A0B03 /* GraptionCore */; };
+		A1B2C3D4E5F60708090A0B02 /* GraptionNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60708090A0B04 /* GraptionNetwork */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
-		9835CFB0306C55AA00F6C1EC /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Base.xcconfig; path = Config/Base.xcconfig; sourceTree = "<group>"; };
 		9835CFA1306C55A900F6C1EC /* Graption.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Graption.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9835CFB0306C55AA00F6C1EC /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Base.xcconfig; path = Config/Base.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A1B2C3D4E5F60708090A0B07 /* Exceptions for "Graption" folder in "Graption" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 9835CFA0306C55A900F6C1EC /* Graption */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		9835CFA3306C55A900F6C1EC /* Graption */ = {
+			exceptions = (
+				A1B2C3D4E5F60708090A0B07 /* Exceptions for "Graption" folder in "Graption" target */,
+			);
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Graption;
 			sourceTree = "<group>";
@@ -23,6 +41,8 @@
 		9835CF9E306C55A900F6C1EC /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				A1B2C3D4E5F60708090A0B01 /* GraptionCore in Frameworks */,
+				A1B2C3D4E5F60708090A0B02 /* GraptionNetwork in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -62,6 +82,10 @@
 				9835CFA3306C55A900F6C1EC /* Graption */,
 			);
 			name = Graption;
+			packageProductDependencies = (
+				A1B2C3D4E5F60708090A0B03 /* GraptionCore */,
+				A1B2C3D4E5F60708090A0B04 /* GraptionNetwork */,
+			);
 			productName = Graption;
 			productReference = 9835CFA1306C55A900F6C1EC /* Graption.app */;
 			productType = "com.apple.product-type.application";
@@ -90,6 +114,10 @@
 			);
 			mainGroup = 9835CF98306C55A900F6C1EC;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A1B2C3D4E5F60708090A0B05 /* XCLocalSwiftPackageReference "Packages/GraptionCore" */,
+				A1B2C3D4E5F60708090A0B06 /* XCLocalSwiftPackageReference "Packages/GraptionNetwork" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9835CFA2306C55A900F6C1EC /* Products */;
 			projectDirPath = "";
@@ -245,7 +273,13 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Graption/Info.plist;
+				INFOPLIST_KEY_GraptionToneToken = "$(TONE_TOKEN)";
+				INFOPLIST_KEY_GraptionToneURL = "$(TONE_URL)";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Graption uses the camera to see who is speaking.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Graption connects to the development tone server on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -277,7 +311,13 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Graption/Info.plist;
+				INFOPLIST_KEY_GraptionToneToken = "$(TONE_TOKEN)";
+				INFOPLIST_KEY_GraptionToneURL = "$(TONE_URL)";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Graption uses the camera to see who is speaking.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Graption connects to the development tone server on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -320,6 +360,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A1B2C3D4E5F60708090A0B05 /* XCLocalSwiftPackageReference "Packages/GraptionCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/GraptionCore;
+		};
+		A1B2C3D4E5F60708090A0B06 /* XCLocalSwiftPackageReference "Packages/GraptionNetwork" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/GraptionNetwork;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A1B2C3D4E5F60708090A0B03 /* GraptionCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F60708090A0B05 /* XCLocalSwiftPackageReference "Packages/GraptionCore" */;
+			productName = GraptionCore;
+		};
+		A1B2C3D4E5F60708090A0B04 /* GraptionNetwork */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F60708090A0B06 /* XCLocalSwiftPackageReference "Packages/GraptionNetwork" */;
+			productName = GraptionNetwork;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9835CF99306C55A900F6C1EC /* Project object */;
 	validationLevel = 1;
