@@ -125,7 +125,7 @@ final class GraptionCoreTests: XCTestCase {
 
         // 3. Old schema versions are rejected
         let staleToneResultJson = String(decoding: sampleToneResultJson, as: UTF8.self)
-            .replacingOccurrences(of: "\"1.1\"", with: "\"1.0\"")
+            .replacingOccurrences(of: "\"1.2\"", with: "\"1.0\"")
             .data(using: .utf8)!
         XCTAssertThrowsError(try decoder.decode(Events.self, from: staleToneResultJson))
     }
