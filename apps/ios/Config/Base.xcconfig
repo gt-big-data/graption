@@ -18,3 +18,5 @@ INFOPLIST_KEY_GraptionToneURL = $(TONE_URL)
 INFOPLIST_KEY_GraptionToneToken = $(TONE_TOKEN)
 
 #include? "Local.xcconfig"
+
+INFOPLIST_KEY_NSMicrophoneUsageDescription = Graption uses your microphone to detect speech and provide live captions.

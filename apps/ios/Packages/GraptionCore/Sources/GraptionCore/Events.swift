@@ -5,7 +5,7 @@
 
 import Foundation
 
-/// Graption event contract v1.1 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds
+/// Graption event contract v1.2 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds
 /// since session start on the phone's monotonic host clock. Changing this file = bump
 /// schema_version and regenerate Pydantic + Swift types.
 ///
@@ -49,6 +49,7 @@ public struct Events: Codable, Sendable {
     public let latencyMS: [String: Double]?
     public let modelVersion: String?
     public let probs: Probs?
+    public let scores: Scores?
     public let tag: String?
     public let code: String?
     public let message: String?
@@ -58,30 +59,23 @@ public struct Events: Codable, Sendable {
     public let requestEncoding: RequestEncoding?
 
     enum CodingKeys: String, CodingKey {
-        case faces = "faces"
+        case faces
         case schemaVersion = "schema_version"
         case sessionID = "session_id"
-        case t = "t"
-        case type = "type"
+        case t, type
         case captionID = "caption_id"
         case modelVersions = "model_versions"
         case speakerID = "speaker_id"
         case tEnd = "t_end"
         case tStart = "t_start"
-        case text = "text"
-        case confidence = "confidence"
-        case label = "label"
+        case text, confidence, label
         case audioB64 = "audio_b64"
         case sampleRate = "sample_rate"
-        case caption = "caption"
+        case caption
         case toneTag = "tone_tag"
         case latencyMS = "latency_ms"
         case modelVersion = "model_version"
-        case probs = "probs"
-        case tag = "tag"
-        case code = "code"
-        case message = "message"
-        case request = "request"
+        case probs, scores, tag, code, message, request
         case requestEncoding = "request_encoding"
     }
 }
@@ -110,6 +104,7 @@ public extension Events {
         latencyMS: [String: Double]? = nil,
         modelVersion: String? = nil,
         probs: Probs? = nil,
+        scores: Scores? = nil,
         tag: String? = nil,
         code: String? = nil,
         message: String? = nil,
@@ -136,6 +131,7 @@ public extension Events {
         self.latencyMS = latencyMS
         self.modelVersion = modelVersion
         self.probs = probs
+        self.scores = scores
         self.tag = tag
         self.code = code
         self.message = message
@@ -178,6 +174,7 @@ public extension Events {
         latencyMS: [String: Double]?? = nil,
         modelVersion: String?? = nil,
         probs: Probs?? = nil,
+        scores: Scores?? = nil,
         tag: String?? = nil,
         code: String?? = nil,
         message: String?? = nil,
@@ -205,6 +202,7 @@ public extension Events {
             latencyMS: latencyMS ?? self.latencyMS,
             modelVersion: modelVersion ?? self.modelVersion,
             probs: probs ?? self.probs,
+            scores: scores ?? self.scores,
             tag: tag ?? self.tag,
             code: code ?? self.code,
             message: message ?? self.message,
@@ -244,8 +242,7 @@ public struct CaptionClass: Codable, Sendable {
         case speakerID = "speaker_id"
         case tEnd = "t_end"
         case tStart = "t_start"
-        case text = "text"
-        case type = "type"
+        case text, type
     }
 }
 
@@ -301,7 +298,7 @@ public extension CaptionClass {
 }
 
 public enum SchemaVersion: String, Codable, Sendable {
-    case the11 = "1.1"
+    case the12 = "1.2"
 }
 
 public enum CaptionType: String, Codable, Sendable {
@@ -317,9 +314,9 @@ public struct EventsSchema: Codable, Sendable {
     public let p: Double
 
     enum CodingKeys: String, CodingKey {
-        case bbox = "bbox"
+        case bbox
         case faceID = "face_id"
-        case p = "p"
+        case p
     }
 }
 
@@ -370,15 +367,6 @@ public struct Probs: Codable, Sendable {
     public let happy: Double
     public let neutral: Double
     public let sad: Double
-
-    enum CodingKeys: String, CodingKey {
-        case anger = "anger"
-        case disgust = "disgust"
-        case fear = "fear"
-        case happy = "happy"
-        case neutral = "neutral"
-        case sad = "sad"
-    }
 }
 
 // MARK: Probs convenience initializers and mutators
@@ -429,6 +417,52 @@ public extension Probs {
 public enum RequestEncoding: String, Codable, Sendable {
     case base64 = "base64"
     case text = "text"
+}
+
+// MARK: - Scores
+public struct Scores: Codable, Sendable {
+    public let arousal: Double
+    public let dominance: Double
+    public let valence: Double
+}
+
+// MARK: Scores convenience initializers and mutators
+
+public extension Scores {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Scores.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        arousal: Double? = nil,
+        dominance: Double? = nil,
+        valence: Double? = nil
+    ) -> Scores {
+        return Scores(
+            arousal: arousal ?? self.arousal,
+            dominance: dominance ?? self.dominance,
+            valence: valence ?? self.valence
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
 }
 
 public enum EventsType: String, Codable, Sendable {

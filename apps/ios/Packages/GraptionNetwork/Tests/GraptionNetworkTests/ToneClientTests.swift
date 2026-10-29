@@ -16,7 +16,7 @@ final class ToneClientTests: XCTestCase {
 
     func testToneRequestUsesSharedSchemaKeys() throws {
         let event = Events(
-            schemaVersion: .the11,
+            schemaVersion: .the12,
             sessionID: "demo",
             type: .toneRequest,
             captionID: "3f1c2a9e-8b7d-4c6e-9a01-2b3c4d5e6f70",
@@ -27,7 +27,7 @@ final class ToneClientTests: XCTestCase {
         )
         let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(event)) as! [String: Any]
         XCTAssertEqual(object["type"] as? String, "tone_request")
-        XCTAssertEqual(object["schema_version"] as? String, "1.1")
+        XCTAssertEqual(object["schema_version"] as? String, "1.2")
         XCTAssertEqual(object["session_id"] as? String, "demo")
     }
 }

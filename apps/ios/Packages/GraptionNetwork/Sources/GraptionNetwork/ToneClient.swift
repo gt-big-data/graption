@@ -108,7 +108,7 @@ public actor ToneClient {
         }
     }
 
-    /// Sends one VAD segment as the schema-v1.1 tone_request text frame expected by P2.
+    /// Sends one VAD segment as the schema-v1.2 tone_request text frame expected by P2.
     public func sendToneRequest(
         captionID: String,
         tStart: Double,
@@ -118,7 +118,7 @@ public actor ToneClient {
     ) async throws {
         if socket == nil { try connect() }
         let event = Events(
-            schemaVersion: .the11,
+            schemaVersion: .the12,
             sessionID: configuration.sessionID,
             type: .toneRequest,
             captionID: captionID,
