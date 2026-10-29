@@ -29,4 +29,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      - name: Test GraptionVision
+        run: swift test --package-path apps/ios/Packages/GraptionVision
+
 #mac-os latest or xcode-27 for the mac server to host and run the Github Actions Server on?

@@ -13,129 +13,7 @@ import UIKit
 import Vision
 import MediaPipeTasksVision
 import GraptionUI
-import GraptionCore
-
-nonisolated private struct OneEuroFilter {
-    private let minCutoff: Double
-    private let beta: Double
-    private let derivativeCutoff: Double
-    private var previousValue: Double?
-    private var previousDerivative = 0.0
-    private var previousTimestamp: Double?
-
-    // Inputs are normalized (0...1) image coordinates, so beta is much larger than the
-    // pixel-space defaults from the paper; otherwise the speed term never reduces lag.
-    init(minCutoff: Double = 1.25, beta: Double = 8.0, derivativeCutoff: Double = 1.0) {
-        self.minCutoff = minCutoff
-        self.beta = beta
-        self.derivativeCutoff = derivativeCutoff
-    }
-
-    mutating func filter(_ value: Double, at timestamp: Double) -> Double {
-        guard let previousValue, let previousTimestamp else {
-            self.previousValue = value
-            self.previousTimestamp = timestamp
-            return value
-        }
-
-        let deltaTime = max(timestamp - previousTimestamp, 1.0 / 120.0)
-        let rawDerivative = (value - previousValue) / deltaTime
-        let derivativeAlpha = smoothingFactor(deltaTime, cutoff: derivativeCutoff)
-        let derivative = exponentialFilter(
-            rawDerivative,
-            previous: self.previousDerivative,
-            alpha: derivativeAlpha
-        )
-        let valueAlpha = smoothingFactor(deltaTime, cutoff: minCutoff + beta * abs(derivative))
-        let filteredValue = exponentialFilter(value, previous: previousValue, alpha: valueAlpha)
-
-        self.previousValue = filteredValue
-        self.previousDerivative = derivative
-        self.previousTimestamp = timestamp
-        return filteredValue
-    }
-
-    private func smoothingFactor(_ deltaTime: Double, cutoff: Double) -> Double {
-        let tau = 1.0 / (2.0 * .pi * cutoff)
-        return 1.0 / (1.0 + tau / deltaTime)
-    }
-
-    private func exponentialFilter(_ value: Double, previous: Double, alpha: Double) -> Double {
-        alpha * value + (1.0 - alpha) * previous
-    }
-}
-
-/// One face as published to the UI. `box` and `landmarks` are normalized to the full,
-/// portrait-oriented frame with a top-left origin. `landmarks` is empty when the face was
-/// detected but too small or occluded for MediaPipe to fit a mesh.
-nonisolated struct FaceTrack: Identifiable, Sendable {
-    let id: Int
-    let box: CGRect
-    let landmarks: [SIMD3<Float>]
-
-    var hasLandmarks: Bool { !landmarks.isEmpty }
-}
-
-nonisolated private struct FaceMeasurement {
-    let box: CGRect
-    let landmarks: [SIMD3<Float>]
-}
-
-nonisolated private struct TrackedFace {
-    let id: Int
-    var box: CGRect
-    var landmarks: [SIMD3<Float>] = []
-    var velocity = CGPoint.zero
-    var missedFrames = 0
-    var xFilter = OneEuroFilter()
-    var yFilter = OneEuroFilter()
-    var widthFilter = OneEuroFilter()
-    var heightFilter = OneEuroFilter()
-    private var lastTimestamp: Double?
-
-    init(id: Int, measurement: FaceMeasurement, timestamp: Double) {
-        self.id = id
-        self.box = measurement.box
-        update(with: measurement, timestamp: timestamp)
-    }
-
-    mutating func update(with measurement: FaceMeasurement, timestamp: Double) {
-        let filtered = CGRect(
-            x: xFilter.filter(measurement.box.minX, at: timestamp),
-            y: yFilter.filter(measurement.box.minY, at: timestamp),
-            width: widthFilter.filter(measurement.box.width, at: timestamp),
-            height: heightFilter.filter(measurement.box.height, at: timestamp)
-        )
-        if let lastTimestamp {
-            let timeScale = max(timestamp - lastTimestamp, 1.0 / 120.0)
-            velocity = CGPoint(
-                x: (filtered.midX - box.midX) / timeScale,
-                y: (filtered.midY - box.midY) / timeScale
-            )
-        }
-        box = filtered
-        landmarks = measurement.landmarks
-        missedFrames = 0
-        lastTimestamp = timestamp
-    }
-
-    mutating func predict(at timestamp: Double) {
-        let deltaTime = max(timestamp - (lastTimestamp ?? timestamp), 1.0 / 120.0)
-        let decay = pow(0.65, deltaTime * 15.0)
-        box = box.offsetBy(
-            dx: velocity.x * deltaTime * decay,
-            dy: velocity.y * deltaTime * decay
-        )
-        velocity.x *= decay
-        velocity.y *= decay
-        // Landmarks from an older frame would no longer line up with the predicted box.
-        landmarks = []
-        missedFrames += 1
-        lastTimestamp = timestamp
-    }
-
-    var output: FaceTrack { FaceTrack(id: id, box: box, landmarks: landmarks) }
-}
+import GraptionVision
 
 /// Where MediaPipe looks for landmarks. Detection always uses Apple Vision.
 nonisolated enum LandmarkMode: Sendable {
@@ -164,8 +42,11 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     private static let minFaceConfidence: Float = 0.5
 
     let session = AVCaptureSession()
-    /// Called on the video queue after every processed frame, with that frame's pixel size.
-    var onFaces: (([FaceTrack], CGSize) -> Void)?
+    /// called on the video queue after every frame with the tracked faces. the guessed speaker
+    /// id (nil if none). and the frame's pixel size.
+    var onFaces: (([FaceTrack], String?, CGSize) -> Void)?
+    private var cameraPosition: AVCaptureDevice.Position = .back
+    private var videoRotationAngle: CGFloat = 90
 
     private let sessionQueue = DispatchQueue(label: "com.graption.camera.session")
     // Frames are processed synchronously here. With alwaysDiscardsLateVideoFrames, frames that
@@ -182,8 +63,10 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     private let sequenceHandler = VNSequenceRequestHandler()
     private var faceLandmarker: FaceLandmarker?
     private var cropPool: CVPixelBufferPool?
-    private var trackedFaces: [TrackedFace] = []
-    private var nextTrackID = 0
+    // v3. tracking lives in GraptionVision/FaceTracker.swift.
+    private var tracker = FaceTracker()
+    // largest face guess until the core ml speaker model replaces it behind SpeakerScorer.
+    private var speakerScorer: any SpeakerScorer = LargestFaceScorer()
     private var publishedEmpty = false
     private var lastLandmarkerTimestamp = -1
 
@@ -191,7 +74,7 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         self.landmarkMode = landmarkMode
     }
 
-    // Back camera, up to 1080p, 15 fps
+    // Back camera by default, up to 1080p, 15 fps. Flip switches to the front camera.
     func start(completion: @escaping @Sendable (Bool) -> Void) {
         sessionQueue.async { [self] in
             if !session.inputs.isEmpty {
@@ -209,7 +92,8 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
                 session.stopRunning()
             }
             videoQueue.async { [self] in
-                trackedFaces.removeAll()
+                // camera stopped means session over. ids restart at f1.
+                tracker.reset()
             }
         }
     }
@@ -219,14 +103,52 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     /// MediaPipe however the phone is held.
     func setVideoRotationAngle(_ angle: CGFloat) {
         sessionQueue.async { [self] in
-            guard let connection = videoOutput.connection(with: .video),
-                  connection.isVideoRotationAngleSupported(angle),
-                  connection.videoRotationAngle != angle else { return }
-            connection.videoRotationAngle = angle
+            let changed = videoRotationAngle != angle
+            videoRotationAngle = angle
+            applyVideoConnectionSettings()
             // Existing tracks are in the old orientation's coordinates.
+            guard changed else { return }
             videoQueue.async { [self] in
-                trackedFaces.removeAll()
+                // not reset() since restarting at f1 mid session could hand an old id to someone new.
+                tracker.forgetTracks()
             }
+        }
+    }
+
+    /// Swaps the capture device. The front camera is mirrored so boxes match the selfie preview.
+    func switchCamera(to position: AVCaptureDevice.Position, completion: @escaping @Sendable (Bool) -> Void) {
+        sessionQueue.async { [self] in
+            guard position != cameraPosition,
+                  let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position),
+                  let input = try? AVCaptureDeviceInput(device: device) else {
+                completion(false)
+                return
+            }
+
+            session.beginConfiguration()
+            let previousInputs = session.inputs
+            for existing in previousInputs {
+                session.removeInput(existing)
+            }
+            guard session.canAddInput(input) else {
+                for existing in previousInputs where session.canAddInput(existing) {
+                    session.addInput(existing)
+                }
+                session.commitConfiguration()
+                completion(false)
+                return
+            }
+            session.addInput(input)
+            cameraPosition = position
+            applyVideoConnectionSettings()
+            session.commitConfiguration()
+            configureCamera(for: device, fps: 15)
+            videoQueue.async { [self] in
+                // other camera means other people. new ids but numbering keeps counting.
+                tracker.forgetTracks()
+                publishedEmpty = false
+            }
+            completion(true)
         }
     }
 
@@ -299,10 +221,7 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
 
         // Start in portrait; the preview's rotation coordinator updates this via
         // setVideoRotationAngle so Vision, MediaPipe, and the preview share one frame.
-        if let connection = videoOutput.connection(with: .video),
-           connection.isVideoRotationAngleSupported(90) {
-            connection.videoRotationAngle = 90
-        }
+        applyVideoConnectionSettings()
 
         configureCamera(for: device, fps: 15)
         return true
@@ -318,11 +237,12 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         guard timestamp.isFinite else { return }
 
         let frameSize = CGSize(width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
-        let faces = updateTracking(with: detectFaces(in: pixelBuffer, timestamp: timestamp), timestamp: timestamp)
+        let faces = tracker.update(with: detectFaces(in: pixelBuffer, timestamp: timestamp), at: timestamp)
+        let speaker = speakerScorer.scores(for: faces, at: timestamp).likelySpeaker()
         // Skip repeated empty updates so an empty room doesn't re-render SwiftUI at 15 fps.
         if faces.isEmpty && publishedEmpty { return }
         publishedEmpty = faces.isEmpty
-        onFaces?(faces, frameSize)
+        onFaces?(faces, speaker, frameSize)
     }
 
     // MARK: Detection
@@ -524,52 +444,24 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         return pool
     }
 
-    // MARK: Tracking
+    // MARK: Camera
 
-    private func updateTracking(with measurements: [FaceMeasurement], timestamp: Double) -> [FaceTrack] {
-        // Greedy assignment over all pairs, closest first, so one face can't steal another's
-        // track just because it was detected earlier in the list.
-        var candidates: [(track: Int, measurement: Int, distance: CGFloat)] = []
-        for trackIndex in trackedFaces.indices {
-            let track = trackedFaces[trackIndex].box
-            let maxDistance = max(track.width, track.height) * 1.5
-            for measurementIndex in measurements.indices {
-                let distance = distance(from: track, to: measurements[measurementIndex].box)
-                if distance <= maxDistance {
-                    candidates.append((trackIndex, measurementIndex, distance))
-                }
+    /// Rotation and mirroring are set on the analyzed frames, not only the preview.
+    /// The front camera is mirrored so a box on the left of the selfie view is the left cheek.
+    private func applyVideoConnectionSettings() {
+        guard let connection = videoOutput.connection(with: .video) else { return }
+        if connection.isVideoRotationAngleSupported(videoRotationAngle),
+           connection.videoRotationAngle != videoRotationAngle {
+            connection.videoRotationAngle = videoRotationAngle
+        }
+        if connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            let mirrored = cameraPosition == .front
+            if connection.isVideoMirrored != mirrored {
+                connection.isVideoMirrored = mirrored
             }
         }
-        candidates.sort { $0.distance < $1.distance }
-
-        var unmatchedTracks = Set(trackedFaces.indices)
-        var unmatchedMeasurements = Set(measurements.indices)
-        for candidate in candidates
-        where unmatchedTracks.contains(candidate.track) && unmatchedMeasurements.contains(candidate.measurement) {
-            trackedFaces[candidate.track].update(with: measurements[candidate.measurement], timestamp: timestamp)
-            unmatchedTracks.remove(candidate.track)
-            unmatchedMeasurements.remove(candidate.measurement)
-        }
-
-        for trackIndex in unmatchedTracks {
-            trackedFaces[trackIndex].predict(at: timestamp)
-        }
-        for measurementIndex in unmatchedMeasurements.sorted() {
-            trackedFaces.append(
-                TrackedFace(id: nextTrackID, measurement: measurements[measurementIndex], timestamp: timestamp)
-            )
-            nextTrackID += 1
-        }
-        trackedFaces.removeAll { $0.missedFrames > 2 || $0.box.maxX < 0 || $0.box.minX > 1 ||
-            $0.box.maxY < 0 || $0.box.minY > 1 }
-        return trackedFaces.map(\.output)
     }
-
-    private func distance(from lhs: CGRect, to rhs: CGRect) -> CGFloat {
-        hypot(lhs.midX - rhs.midX, lhs.midY - rhs.midY)
-    }
-
-    // MARK: Camera
 
     private func configureCamera(for device: AVCaptureDevice, fps: Double) {
         do {
@@ -608,8 +500,12 @@ final class CameraController: ObservableObject {
 
     @Published private(set) var status: Status = .notDetermined
     @Published private(set) var faces: [FaceTrack] = []
+    @Published private(set) var cameraPosition: AVCaptureDevice.Position = .back
+    /// id of the face drawn as the speaker. nil when no faces.
+    @Published private(set) var speakerID: String?
     /// Width / height of the analyzed frames; flips when the phone rotates.
     @Published private(set) var captureAspectRatio: CGFloat = 9.0 / 16.0
+    private var isSwitchingCamera = false
 
     // Landmark mode for the whole app. Currently .faceCrops; change to .fullFrame to switch.
     // ASD training extraction must use the same mode (GRAPTION_CONTEXT.md §6).
@@ -617,9 +513,10 @@ final class CameraController: ObservableObject {
     var session: AVCaptureSession { engine.session }
 
     init() {
-        engine.onFaces = { [weak self] faces, frameSize in
+        engine.onFaces = { [weak self] faces, speakerID, frameSize in
             DispatchQueue.main.async {
                 self?.faces = faces
+                self?.speakerID = speakerID
                 self?.captureAspectRatio = frameSize.width / frameSize.height
             }
         }
@@ -651,10 +548,27 @@ final class CameraController: ObservableObject {
     func stop() {
         engine.stop()
         faces = []
+        speakerID = nil
     }
 
     func setVideoRotationAngle(_ angle: CGFloat) {
         engine.setVideoRotationAngle(angle)
+    }
+
+    func flipCamera() {
+        guard status == .running, !isSwitchingCamera else { return }
+        isSwitchingCamera = true
+        let next: AVCaptureDevice.Position = cameraPosition == .back ? .front : .back
+        engine.switchCamera(to: next) { [weak self] success in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isSwitchingCamera = false
+                guard success else { return }
+                self.cameraPosition = next
+                self.faces = []
+                self.speakerID = nil
+            }
+        }
     }
 
     private func startEngine() {
@@ -668,6 +582,7 @@ final class CameraController: ObservableObject {
 
 private struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    let cameraPosition: AVCaptureDevice.Position
     /// Called on the main thread with the preview's rotation angle whenever it changes.
     let onRotationAngle: (CGFloat) -> Void
 
@@ -676,22 +591,46 @@ private struct CameraPreview: UIViewRepresentable {
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
         view.onRotationAngle = onRotationAngle
+        view.setCameraPosition(cameraPosition)
         return view
     }
 
-    func updateUIView(_ uiView: PreviewView, context: Context) {}
+    func updateUIView(_ uiView: PreviewView, context: Context) {
+        uiView.setCameraPosition(cameraPosition)
+    }
 
     final class PreviewView: UIView {
         override static var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
         var onRotationAngle: ((CGFloat) -> Void)?
+        private var cameraPosition: AVCaptureDevice.Position = .back
         private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
         private var rotationObservation: AnyCancellable?
 
+        func setCameraPosition(_ position: AVCaptureDevice.Position) {
+            let changed = cameraPosition != position
+            cameraPosition = position
+            applyMirroring()
+            guard changed else { return }
+            rotationObservation?.cancel()
+            rotationObservation = nil
+            rotationCoordinator = nil
+            attachCoordinator()
+        }
+
         // The coordinator reads the interface orientation from the layer's window, so start
-        // observing once the view is on screen.
+        // observing once the view is on screen. A camera flip binds the coordinator to the new device.
         override func didMoveToWindow() {
             super.didMoveToWindow()
+            attachCoordinator()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            applyMirroring()
+        }
+
+        private func attachCoordinator() {
             guard window != nil, rotationCoordinator == nil,
                   let device = (previewLayer.session?.inputs.first as? AVCaptureDeviceInput)?.device else { return }
             let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
@@ -700,12 +639,23 @@ private struct CameraPreview: UIViewRepresentable {
                 .publisher(for: \.videoRotationAngleForHorizonLevelPreview)
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] angle in self?.applyRotation(angle) }
+            applyRotation(coordinator.videoRotationAngleForHorizonLevelPreview)
+        }
+
+        private func applyMirroring() {
+            guard let connection = previewLayer.connection, connection.isVideoMirroringSupported else { return }
+            connection.automaticallyAdjustsVideoMirroring = false
+            let mirrored = cameraPosition == .front
+            if connection.isVideoMirrored != mirrored {
+                connection.isVideoMirrored = mirrored
+            }
         }
 
         private func applyRotation(_ angle: CGFloat) {
             if let connection = previewLayer.connection, connection.isVideoRotationAngleSupported(angle) {
                 connection.videoRotationAngle = angle
             }
+            applyMirroring()
             onRotationAngle?(angle)
         }
     }
@@ -726,14 +676,17 @@ struct CameraView: View {
                         ZStack {
                             CameraPreview(
                                 session: controller.session,
+                                cameraPosition: controller.cameraPosition,
                                 onRotationAngle: controller.setVideoRotationAngle
                             )
                             .ignoresSafeArea()
 
                             ForEach(controller.faces) { face in
                                 FaceBox(
+                                    id: face.id,
                                     box: face.box,
                                     hasLandmarks: face.hasLandmarks,
+                                    isSpeaker: face.id == controller.speakerID,
                                     size: geometry.size,
                                     sourceAspectRatio: controller.captureAspectRatio,
                                     color: speakerBoxColor()
@@ -780,6 +733,20 @@ struct CameraView: View {
             .padding(.leading, 16)
             .tint(.white)
         }
+        .overlay(alignment: .bottomTrailing) {
+            if controller.status == .running {
+                Button(action: controller.flipCamera) {
+                    Image(systemName: "arrow.triangle.2.circlepath.camera")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 52, height: 52)
+                        .background(.black.opacity(0.45), in: Circle())
+                }
+                .padding(.trailing, 16)
+                .padding(.bottom, 16)
+                .accessibilityLabel(controller.cameraPosition == .back ? "Use selfie camera" : "Use back camera")
+            }
+        }
         .onAppear { controller.start() }
         .onDisappear { controller.stop() }
     }
@@ -799,18 +766,18 @@ struct CameraView: View {
     }
 
     private func speakerBoxColor() -> Color {
-        if let speaker = captions.first?.speakerName {
-            return colorForSpeaker(speaker)
-        }
-        return Color(red: 1.0, green: 0.90, blue: 0.43)
+        speakerCaptionColor(captions.first?.speakerName)
     }
 }
 
 /// Solid when MediaPipe fit a mesh to the face; dashed when only Vision detected it
 /// (usually a face too small or turned away for landmarks).
+/// The outline uses the active caption's speaker color. The label still shows the track id.
 private struct FaceBox: View {
+    let id: String
     let box: CGRect
     let hasLandmarks: Bool
+    let isSpeaker: Bool
     let size: CGSize
     let sourceAspectRatio: CGFloat
     let color: Color
@@ -828,6 +795,15 @@ private struct FaceBox: View {
                 width: box.width * renderedWidth,
                 height: box.height * renderedHeight
             )
+            .overlay(alignment: .topLeading) {
+                // The id stays visible so a returning face can be checked against the same track.
+                Text(isSpeaker ? "\(id) talking" : id)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 4)
+                    .background(color)
+                    .offset(y: -18)
+            }
             .position(
                 x: box.midX * renderedWidth - horizontalCrop,
                 y: box.midY * renderedHeight - verticalCrop
