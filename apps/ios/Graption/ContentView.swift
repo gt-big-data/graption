@@ -47,7 +47,7 @@ struct ContentView: View {
         Group {
             if isReady {
                 LiveCaptionScreen(
-                    cameraPreviewDestination: { AnyView(CameraView()) },
+                    cameraPreviewDestination: { AnyView(CameraView(captions: bubbleCaptions)) },
                     captions: bubbleCaptions,
                     soundAlert: bannerAlert,
                     isListening: isRecording || isCalibrating,

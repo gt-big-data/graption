@@ -83,7 +83,7 @@ public struct LiveCaptionScreen: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            LiveVideoFeedView(captions: displayedCaptions)
+            videoArea
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if onSetup != nil || onCalibrate != nil {
@@ -129,6 +129,26 @@ public struct LiveCaptionScreen: View {
         }
         .onDisappear {
             simulator.stop()
+        }
+    }
+
+    private var videoArea: some View {
+        ZStack(alignment: .bottom) {
+            if let dest = cameraPreviewDestination {
+                dest()
+            } else {
+                LiveVideoFeedView(captions: displayedCaptions)
+            }
+
+            if !displayedCaptions.isEmpty && cameraPreviewDestination != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(displayedCaptions) { caption in
+                        CaptionBubbleView(caption: caption)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 

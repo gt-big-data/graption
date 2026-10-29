@@ -12,6 +12,7 @@ import Combine
 import UIKit
 import Vision
 import MediaPipeTasksVision
+import GraptionUI
 import GraptionVision
 
 /// Where MediaPipe looks for landmarks. Detection always uses Apple Vision.
@@ -663,6 +664,7 @@ private struct CameraPreview: UIViewRepresentable {
 struct CameraView: View {
     @StateObject private var controller = CameraController()
     @Environment(\.dismiss) private var dismiss
+    var captions: [LiveCaption] = []
 
     var body: some View {
         ZStack {
@@ -686,7 +688,8 @@ struct CameraView: View {
                                     hasLandmarks: face.hasLandmarks,
                                     isSpeaker: face.id == controller.speakerID,
                                     size: geometry.size,
-                                    sourceAspectRatio: controller.captureAspectRatio
+                                    sourceAspectRatio: controller.captureAspectRatio,
+                                    color: speakerBoxColor()
                                 )
                             }
 
@@ -761,11 +764,15 @@ struct CameraView: View {
         .foregroundStyle(.white)
         .padding()
     }
+
+    private func speakerBoxColor() -> Color {
+        speakerCaptionColor(captions.first?.speakerName)
+    }
 }
 
 /// Solid when MediaPipe fit a mesh to the face; dashed when only Vision detected it
 /// (usually a face too small or turned away for landmarks).
-/// v3. green marks the guessed speaker. the label shows the track id so id stability is visible.
+/// The outline uses the active caption's speaker color. The label still shows the track id.
 private struct FaceBox: View {
     let id: String
     let box: CGRect
@@ -773,6 +780,7 @@ private struct FaceBox: View {
     let isSpeaker: Bool
     let size: CGSize
     let sourceAspectRatio: CGFloat
+    let color: Color
 
     var body: some View {
         let scale = max(size.width / sourceAspectRatio, size.height)
@@ -781,8 +789,6 @@ private struct FaceBox: View {
         let horizontalCrop = (renderedWidth - size.width) / 2
         let verticalCrop = (renderedHeight - size.height) / 2
 
-        let color: Color = isSpeaker ? .green : .yellow
-
         Rectangle()
             .stroke(color, style: StrokeStyle(lineWidth: 3, dash: hasLandmarks ? [] : [8, 6]))
             .frame(
@@ -790,7 +796,7 @@ private struct FaceBox: View {
                 height: box.height * renderedHeight
             )
             .overlay(alignment: .topLeading) {
-                // v3. spell out the guess since green alone was hard to read on device.
+                // The id stays visible so a returning face can be checked against the same track.
                 Text(isSpeaker ? "\(id) talking" : id)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.black)

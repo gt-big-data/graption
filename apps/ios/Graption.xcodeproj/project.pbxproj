@@ -7,11 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		65CCECB03074877500093FF3 /* GraptionAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 65CCECAF3074877500093FF3 /* GraptionAudio */; };
-		5A863841E58064FDABEE6763 /* GraptionUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1504F8340E9DC8A84ACE6184 /* GraptionUI */; };
 		19DABF99307713050033A27A /* MediaPipeTasksAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF98307713050033A27A /* MediaPipeTasksAudio */; };
 		19DABF9B307713050033A27A /* MediaPipeTasksVision in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF9A307713050033A27A /* MediaPipeTasksVision */; };
 		19DABF9E307713050033A27A /* GraptionVision in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF9D307713050033A27A /* GraptionVision */; };
+		5A863841E58064FDABEE6763 /* GraptionUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1504F8340E9DC8A84ACE6184 /* GraptionUI */; };
+		65CCECB03074877500093FF3 /* GraptionAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 65CCECAF3074877500093FF3 /* GraptionAudio */; };
 		A1B2C3D4E5F60708090A0B02 /* GraptionNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60708090A0B04 /* GraptionNetwork */; };
 /* End PBXBuildFile section */
 
@@ -22,6 +22,16 @@
 		9835CFA1306C55A900F6C1EC /* Graption.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Graption.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9835CFB0306C55AA00F6C1EC /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Base.xcconfig; path = Config/Base.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A1B2C3D4E5F60708090A0B07 /* Exceptions for "Graption" folder in "Graption" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 9835CFA0306C55A900F6C1EC /* Graption */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		65CCEC8E30746DA700093FF3 /* GraptionAudio */ = {
@@ -43,16 +53,6 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
-
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		A1B2C3D4E5F60708090A0B07 /* Exceptions for "Graption" folder in "Graption" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 9835CFA0306C55A900F6C1EC /* Graption */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		9835CF9E306C55A900F6C1EC /* Frameworks */ = {
@@ -409,6 +409,10 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		19DABF9C307713050033A27A /* XCLocalSwiftPackageReference "Packages/GraptionVision" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/GraptionVision;
+		};
 		65CCECAE3074877500093FF3 /* XCLocalSwiftPackageReference "Packages/GraptionAudio" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/GraptionAudio;
@@ -416,10 +420,6 @@
 		6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "Packages/GraptionUI" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/GraptionUI;
-		};
-		19DABF9C307713050033A27A /* XCLocalSwiftPackageReference "Packages/GraptionVision" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/GraptionVision;
 		};
 		A1B2C3D4E5F60708090A0B06 /* XCLocalSwiftPackageReference "Packages/GraptionNetwork" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -439,10 +439,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		65CCECAF3074877500093FF3 /* GraptionAudio */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = GraptionAudio;
-		};
 		1504F8340E9DC8A84ACE6184 /* GraptionUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "Packages/GraptionUI" */;
@@ -461,6 +457,10 @@
 		19DABF9D307713050033A27A /* GraptionVision */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = GraptionVision;
+		};
+		65CCECAF3074877500093FF3 /* GraptionAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GraptionAudio;
 		};
 		A1B2C3D4E5F60708090A0B04 /* GraptionNetwork */ = {
 			isa = XCSwiftPackageProductDependency;
