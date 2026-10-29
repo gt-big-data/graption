@@ -12,6 +12,7 @@
 		19DABF99307713050033A27A /* MediaPipeTasksAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF98307713050033A27A /* MediaPipeTasksAudio */; };
 		19DABF9B307713050033A27A /* MediaPipeTasksVision in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF9A307713050033A27A /* MediaPipeTasksVision */; };
 		19DABF9E307713050033A27A /* GraptionVision in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF9D307713050033A27A /* GraptionVision */; };
+		A1B2C3D4E5F60708090A0B02 /* GraptionNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60708090A0B04 /* GraptionNetwork */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -35,10 +36,23 @@
 		};
 		9835CFA3306C55A900F6C1EC /* Graption */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1B2C3D4E5F60708090A0B07 /* Exceptions for "Graption" folder in "Graption" target */,
+			);
 			path = Graption;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A1B2C3D4E5F60708090A0B07 /* Exceptions for "Graption" folder in "Graption" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 9835CFA0306C55A900F6C1EC /* Graption */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		9835CF9E306C55A900F6C1EC /* Frameworks */ = {
@@ -49,6 +63,7 @@
 				19DABF9B307713050033A27A /* MediaPipeTasksVision in Frameworks */,
 				19DABF99307713050033A27A /* MediaPipeTasksAudio in Frameworks */,
 				19DABF9E307713050033A27A /* GraptionVision in Frameworks */,
+				A1B2C3D4E5F60708090A0B02 /* GraptionNetwork in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -115,6 +130,7 @@
 				19DABF98307713050033A27A /* MediaPipeTasksAudio */,
 				19DABF9A307713050033A27A /* MediaPipeTasksVision */,
 				19DABF9D307713050033A27A /* GraptionVision */,
+				A1B2C3D4E5F60708090A0B04 /* GraptionNetwork */,
 			);
 			productName = Graption;
 			productReference = 9835CFA1306C55A900F6C1EC /* Graption.app */;
@@ -149,6 +165,7 @@
 				6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "Packages/GraptionUI" */,
 				19DABF97307713050033A27A /* XCRemoteSwiftPackageReference "mediapipe" */,
 				19DABF9C307713050033A27A /* XCLocalSwiftPackageReference "Packages/GraptionVision" */,
+				A1B2C3D4E5F60708090A0B06 /* XCLocalSwiftPackageReference "Packages/GraptionNetwork" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9835CFA2306C55A900F6C1EC /* Products */;
@@ -404,6 +421,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/GraptionVision;
 		};
+		A1B2C3D4E5F60708090A0B06 /* XCLocalSwiftPackageReference "Packages/GraptionNetwork" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/GraptionNetwork;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -440,6 +461,11 @@
 		19DABF9D307713050033A27A /* GraptionVision */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = GraptionVision;
+		};
+		A1B2C3D4E5F60708090A0B04 /* GraptionNetwork */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F60708090A0B06 /* XCLocalSwiftPackageReference "Packages/GraptionNetwork" */;
+			productName = GraptionNetwork;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -1,10 +1,16 @@
 import SwiftUI
 import GraptionAudio
+import GraptionNetwork
 import GraptionUI
 
 @MainActor
 struct ContentView: View {
     @State private var capture: MicrophoneCapture?
+    @StateObject private var toneMonitor = ToneConnectionMonitor(
+        configuration: ToneClientConfiguration.fromAppConfiguration(
+            sessionID: UUID().uuidString
+        )
+    )
     @State private var soundAlertModel = SoundAlertModel()
     @State private var hasPrintedLabels = false
     @State private var isVisible = false
@@ -46,7 +52,7 @@ struct ContentView: View {
                     soundAlert: bannerAlert,
                     isListening: isRecording || isCalibrating,
                     canListen: canListen,
-                    statusText: status,
+                    statusText: "\(status) · \(toneMonitor.state.label)",
                     onMicrophone: {
                         if isRecording || isCalibrating {
                             stopListening()
@@ -69,6 +75,7 @@ struct ContentView: View {
         }
         .task {
             isVisible = true
+            toneMonitor.start()
             do {
                 // Reuse one capture so calibration survives Stop/Start.
                 if capture == nil {
@@ -86,6 +93,7 @@ struct ContentView: View {
         }
         .onDisappear {
             isVisible = false
+            toneMonitor.stop()
             listenTask?.cancel()
             capture?.onSegment = nil
             capture?.onSoundAlert = nil

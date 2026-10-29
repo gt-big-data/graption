@@ -26,35 +26,37 @@ import Foundation
 /// Tone server -> client. Malformed request rejected; connection stays open. Request is
 /// echoed only to the originating client, never stored or logged.
 // MARK: - Events
-struct Events: Codable {
-    let faces: [EventsSchema]?
-    let schemaVersion: SchemaVersion
-    let sessionID: String
-    let t: Double?
-    let type: EventsType
-    let captionID: String?
-    let modelVersions: [String: String]?
+public struct Events: Codable, Sendable {
+    public let faces: [EventsSchema]?
+    public let schemaVersion: SchemaVersion
+    public let sessionID: String
+    public let t: Double?
+    public let type: EventsType
+    public let captionID: String?
+    public let modelVersions: [String: String]?
     /// Face id chosen by fusion, or "unknown" (off-screen/ambiguous; shown as "Someone").
-    let speakerID: String?
-    let tEnd, tStart: Double?
-    let text: String?
-    let confidence: Double?
-    let label: String?
+    public let speakerID: String?
+    public let tEnd: Double?
+    public let tStart: Double?
+    public let text: String?
+    public let confidence: Double?
+    public let label: String?
     /// PCM16 mono little-endian. Never written to disk or logs.
-    let audioB64: String?
-    let sampleRate: Int?
-    let caption: CaptionClass?
-    let toneTag: String?
-    let latencyMS: [String: Double]?
-    let modelVersion: String?
-    let probs: Probs?
-    let scores: Scores?
-    let tag: String?
-    let code, message: String?
+    public let audioB64: String?
+    public let sampleRate: Int?
+    public let caption: CaptionClass?
+    public let toneTag: String?
+    public let latencyMS: [String: Double]?
+    public let modelVersion: String?
+    public let probs: Probs?
+    public let scores: Scores?
+    public let tag: String?
+    public let code: String?
+    public let message: String?
     /// Exact received text, or base64 for an unsupported binary frame. May contain audio: never
     /// store or log.
-    let request: String?
-    let requestEncoding: RequestEncoding?
+    public let request: String?
+    public let requestEncoding: RequestEncoding?
 
     enum CodingKeys: String, CodingKey {
         case faces
@@ -80,7 +82,62 @@ struct Events: Codable {
 
 // MARK: Events convenience initializers and mutators
 
-extension Events {
+public extension Events {
+    init(
+        schemaVersion: SchemaVersion,
+        sessionID: String,
+        type: EventsType,
+        faces: [EventsSchema]? = nil,
+        t: Double? = nil,
+        captionID: String? = nil,
+        modelVersions: [String: String]? = nil,
+        speakerID: String? = nil,
+        tEnd: Double? = nil,
+        tStart: Double? = nil,
+        text: String? = nil,
+        confidence: Double? = nil,
+        label: String? = nil,
+        audioB64: String? = nil,
+        sampleRate: Int? = nil,
+        caption: CaptionClass? = nil,
+        toneTag: String? = nil,
+        latencyMS: [String: Double]? = nil,
+        modelVersion: String? = nil,
+        probs: Probs? = nil,
+        scores: Scores? = nil,
+        tag: String? = nil,
+        code: String? = nil,
+        message: String? = nil,
+        request: String? = nil,
+        requestEncoding: RequestEncoding? = nil
+    ) {
+        self.faces = faces
+        self.schemaVersion = schemaVersion
+        self.sessionID = sessionID
+        self.t = t
+        self.type = type
+        self.captionID = captionID
+        self.modelVersions = modelVersions
+        self.speakerID = speakerID
+        self.tEnd = tEnd
+        self.tStart = tStart
+        self.text = text
+        self.confidence = confidence
+        self.label = label
+        self.audioB64 = audioB64
+        self.sampleRate = sampleRate
+        self.caption = caption
+        self.toneTag = toneTag
+        self.latencyMS = latencyMS
+        self.modelVersion = modelVersion
+        self.probs = probs
+        self.scores = scores
+        self.tag = tag
+        self.code = code
+        self.message = message
+        self.request = request
+        self.requestEncoding = requestEncoding
+    }
     init(data: Data) throws {
         self = try newJSONDecoder().decode(Events.self, from: data)
     }
@@ -165,16 +222,17 @@ extension Events {
 
 /// On-device. Emitted when WhisperKit finishes a segment.
 // MARK: - CaptionClass
-struct CaptionClass: Codable {
-    let captionID: String
-    let modelVersions: [String: String]
-    let schemaVersion: SchemaVersion
-    let sessionID: String
+public struct CaptionClass: Codable, Sendable {
+    public let captionID: String
+    public let modelVersions: [String: String]
+    public let schemaVersion: SchemaVersion
+    public let sessionID: String
     /// Face id chosen by fusion, or "unknown" (off-screen/ambiguous; shown as "Someone").
-    let speakerID: String
-    let tEnd, tStart: Double
-    let text: String
-    let type: CaptionType
+    public let speakerID: String
+    public let tEnd: Double
+    public let tStart: Double
+    public let text: String
+    public let type: CaptionType
 
     enum CodingKeys: String, CodingKey {
         case captionID = "caption_id"
@@ -190,7 +248,7 @@ struct CaptionClass: Codable {
 
 // MARK: CaptionClass convenience initializers and mutators
 
-extension CaptionClass {
+public extension CaptionClass {
     init(data: Data) throws {
         self = try newJSONDecoder().decode(CaptionClass.self, from: data)
     }
@@ -239,21 +297,21 @@ extension CaptionClass {
     }
 }
 
-enum SchemaVersion: String, Codable {
+public enum SchemaVersion: String, Codable, Sendable {
     case the12 = "1.2"
 }
 
-enum CaptionType: String, Codable {
+public enum CaptionType: String, Codable, Sendable {
     case caption = "caption"
 }
 
 // MARK: - EventsSchema
-struct EventsSchema: Codable {
+public struct EventsSchema: Codable, Sendable {
     /// [x, y, w, h]
-    let bbox: [Double]
-    let faceID: String
+    public let bbox: [Double]
+    public let faceID: String
     /// Smoothed p(speaking).
-    let p: Double
+    public let p: Double
 
     enum CodingKeys: String, CodingKey {
         case bbox
@@ -264,7 +322,7 @@ struct EventsSchema: Codable {
 
 // MARK: EventsSchema convenience initializers and mutators
 
-extension EventsSchema {
+public extension EventsSchema {
     init(data: Data) throws {
         self = try newJSONDecoder().decode(EventsSchema.self, from: data)
     }
@@ -302,14 +360,18 @@ extension EventsSchema {
 }
 
 // MARK: - Probs
-struct Probs: Codable {
-    let anger, disgust, fear, happy: Double
-    let neutral, sad: Double
+public struct Probs: Codable, Sendable {
+    public let anger: Double
+    public let disgust: Double
+    public let fear: Double
+    public let happy: Double
+    public let neutral: Double
+    public let sad: Double
 }
 
 // MARK: Probs convenience initializers and mutators
 
-extension Probs {
+public extension Probs {
     init(data: Data) throws {
         self = try newJSONDecoder().decode(Probs.self, from: data)
     }
@@ -352,19 +414,21 @@ extension Probs {
     }
 }
 
-enum RequestEncoding: String, Codable {
+public enum RequestEncoding: String, Codable, Sendable {
     case base64 = "base64"
     case text = "text"
 }
 
 // MARK: - Scores
-struct Scores: Codable {
-    let arousal, dominance, valence: Double
+public struct Scores: Codable, Sendable {
+    public let arousal: Double
+    public let dominance: Double
+    public let valence: Double
 }
 
 // MARK: Scores convenience initializers and mutators
 
-extension Scores {
+public extension Scores {
     init(data: Data) throws {
         self = try newJSONDecoder().decode(Scores.self, from: data)
     }
@@ -401,7 +465,7 @@ extension Scores {
     }
 }
 
-enum EventsType: String, Codable {
+public enum EventsType: String, Codable, Sendable {
     case caption = "caption"
     case captionLog = "caption_log"
     case sessionError = "session_error"
