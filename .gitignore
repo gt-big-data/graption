@@ -63,3 +63,6 @@ Pods/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Web dependencies
+node_modules/

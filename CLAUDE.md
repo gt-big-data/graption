@@ -56,3 +56,7 @@ Never put a `DEVELOPMENT_TEAM` or bundle ID in `project.pbxproj`; signing comes 
 | UI/UX | none | `GraptionUI` |
 
 PRs to `main`; CI must pass. Changes to `schemas/` or `ml/common/` affect other teams: tag the lead.
+
+### Web dashboard
+
+From `apps/web/`: `npm ci`, `npm run dev`, `npm run gen:types`, `npm run lint`, `npm test`, and `npm run build`.
