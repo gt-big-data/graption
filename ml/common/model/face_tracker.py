@@ -10,7 +10,8 @@ FaceLandmarker = vision.FaceLandmarker
 FaceLandmarkerOptions = vision.FaceLandmarkerOptions
 FaceLandmarkerResult = vision.FaceLandmarkerResult
 VisionRunningMode = vision.RunningMode
-output_face_blendshapes = Trues
+output_face_blendshapes = True
+output_facial_transformation_matrixes = True
 
 latest_landmarks = None
 

@@ -1,5 +1,4 @@
 import math
-import cv2
 import numpy as np
 
 LIP_LANDMARKS = [0, 13, 14, 17, 37, 39, 40, 61, 
@@ -27,48 +26,38 @@ BLENDSHAPE_NAMES = [
     "mouthRollUpper",
 ]
 
-# Landmarks to help determine Yaw, Pitch, and Roll
-YPR_POSE_LANDMARKS = [
-    1,    # Nose tip
-    152,  # Chin
-    33,   # Left eye outer corner
-    263,  # Right eye outer corner
-    61,   # Left mouth corner
-    291   # Right mouth corner
-]
-
-# Generated from Chat-GPT. Necessary for cv2.solvePnP() so it has 2D image coordinated (from MediaPipe) and 3D model corodinates (to replicate real face)
-# Approximation
-FACE_MODEL_POINTS = np.array([
-    (0.0, 0.0, 0.0),          # Nose tip
-    (0.0, 330.0, 65.0),       # Chin
-    (-225.0, -170.0, 135.0),  # Eye corner: image left
-    (225.0, -170.0, 135.0),   # Eye corner: image right
-    (-150.0, 150.0, 125.0),   # Mouth corner: image left
-    (150.0, 150.0, 125.0),    # Mouth corner: image right
-], dtype=np.float64)
 
 # Placeholder for loudness value
 loudness = 0.0
 
-def extract_lip_features(face_landmarks):
+def extract_lip_features(face_landmarks, image_width, image_height):
     lip_feature_landmarks = []
 
     nose = face_landmarks[NOSE_TIP_LM]
     left_eye = face_landmarks[LEFT_EYE_LM]
     right_eye = face_landmarks[RIGHT_EYE_LM]
 
-    inter_ocular_distance = math.hypot(right_eye.x - left_eye.x, right_eye.y - left_eye.y)
+    # Convert to pixel coordinates to avoid aspect ratio issues
+    nose_x = nose.x * image_width
+    nose_y = nose.y * image_height
+
+    left_eye_x = left_eye.x * image_width
+    left_eye_y = left_eye.y * image_height
+
+    right_eye_x = right_eye.x * image_width
+    right_eye_y = right_eye.y * image_height
+
+    inter_ocular_distance = math.hypot(right_eye_x - left_eye_x, right_eye_y - left_eye_y)
     
     for lm in LIP_LANDMARKS:
-
-        # Must normalize feature vector based on distance from camera as well
-        # Equation: x_normal = (x_lip - x_nose) / inter_ocular_distance
-        #           y_normal = (y_lip - y_nose) / inter_ocular_distance
         
         lip = face_landmarks[lm]
-        x_normal = (lip.x - nose.x) / inter_ocular_distance
-        y_normal = (lip.y - nose.y) / inter_ocular_distance
+
+        lip_x = lip.x * image_width
+        lip_y = lip.y * image_height
+        
+        x_normal = (lip_x - nose_x) / inter_ocular_distance
+        y_normal = (lip_y - nose_y) / inter_ocular_distance
         
         lip_feature_landmarks.append(x_normal)
         lip_feature_landmarks.append(y_normal)
@@ -85,88 +74,23 @@ def extract_face_blendshapes(face_blendshapes):
     
     return face_blendshape_values
 
-def extract_head_ypr(face_landmarks, image_width, image_height):
-    points = []
-
-    for i in YPR_POSE_LANDMARKS:
-        x = face_landmarks[i].x * image_width
-        y = face_landmarks[i].y * image_height
-        points.append([x, y]) 
-
-    image_points = np.array(points, dtype=np.float64)
-
-    focal_length = image_width
-
-    # Necessary for cv2.solvePnP()
-    camera_matrix = np.array([
-        [focal_length, 0, image_width / 2],
-        [0, focal_length, image_height / 2],
-        [0, 0, 1],
-    ], dtype=np.float64)
+def extract_head_ypr(facial_transformation_matrix):
     
-    # Necessary for cv2.solvePnP()
-    distortion_coefficients = np.zeros((4, 1), dtype=np.float64)
-
-    success, rotation_vector, translation_vector = cv2.solvePnP(
-        FACE_MODEL_POINTS, #6 assumed 3D facial points (approximation)
-        image_points, # Corresponding 6 2D points from face detection (MediaPipe)
-        camera_matrix, # Camera intrinsic matrix
-        distortion_coefficients, # Distortion coefficients
-    )
-
-    if not success:
-        print("solvePnP() failed")
-        return [0.0, 0.0, 0.0]
-
-    # Project the estimated 3D face points back onto the 2D image.
-    projected_points, _ = cv2.projectPoints(
-        FACE_MODEL_POINTS,
-        rotation_vector,
-        translation_vector,
-        camera_matrix,
-        distortion_coefficients,
-    )
-
-    # Measure how far the projected points are from the actual landmarks.
-    errors = np.linalg.norm(
-        image_points.reshape(-1, 2) - projected_points.reshape(-1, 2),
-        axis=1,
-    )
-
-    mean_error = errors.mean()
-
-    global last_valid_pose
-
-    if mean_error > 20.0:
-        print("Invalid pose. Reusing last valid pose.")
-
-        if last_valid_pose is not None:
-            return last_valid_pose.copy()
-
-        # No valid pose has been calculated yet.
-        return [0.0, 0.0, 0.0]
-
-    rotation_matrix, _ = cv2.Rodrigues(rotation_vector)
-
-    euler_degrees, _, _, _, _, _ = cv2.RQDecomp3x3(rotation_matrix)
-    euler_radians = np.array(euler_degrees) * np.pi / 180
-
-    print("Euler degrees:", euler_degrees)
-    print("Euler radians:", euler_radians)
-
-    pitch, yaw, roll = euler_radians
-
-    last_valid_pose = [yaw, pitch, roll].copy()
-
+    r = np.asarray(facial_transformation_matrix)[:3, :3]
+    
+    yaw = math.atan2(r[0, 2], r[2, 2])
+    pitch = math.asin(max(-1.0, min(1.0, -r[1, 2])))
+    roll = math.atan2(r[1, 0], r[1, 1])
+    
     return [yaw, pitch, roll]
 
-def extract_full_featureVec(face_landmarks, face_blendshapes, image_width, image_height):
-    lip_features = extract_lip_features(face_landmarks)
-    head_ypr = extract_head_ypr(face_landmarks, image_width, image_height)
+def extract_full_featureVec(face_landmarks, face_blendshapes, facial_transformation_matrix, image_width, image_height):
+    lip_features = extract_lip_features(face_landmarks, image_width, image_height)
+    head_ypr = extract_head_ypr(facial_transformation_matrix)
     blendshape_values = extract_face_blendshapes(face_blendshapes)
     
     # Full 96-value feature vector
-    return lip_features + head_ypr + blendshape_values + loudness
+    return lip_features + head_ypr + blendshape_values + [loudness]
 
 
 
