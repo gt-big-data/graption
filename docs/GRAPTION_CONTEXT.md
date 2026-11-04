@@ -374,6 +374,10 @@ for caption [t0, t1]:
 - Large and dynamic type, high contrast. Follow Apple's Accessibility HIG.
 
 **Past-meetings dashboard** (Platform)
+
+Saved meeting data leaves the phone only through an explicit user-initiated export.
+The versioned JSON export contains captions and metadata, never audio or raw events.
+The web dashboard reads exports locally in memory.
 - Lists saved sessions. Each shows its caption log (speaker, text, tone tag) and an AI summary/notes (section 10).
 - Stores caption text, speakers, tags, and timings **on-device only**. Never audio or video.
 - Works offline. Summaries that need a model the device lacks are simply unavailable.
