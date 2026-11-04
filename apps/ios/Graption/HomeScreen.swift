@@ -12,6 +12,7 @@ struct HomeScreen: View {
     @Environment(\.dismiss) private var dismiss
     var onOpenLiveCaptions: () -> Void = {}
     var onOpenSettings: () -> Void = {}
+    var onOpenTranscript: () -> Void = {}
 
     var body: some View {
         ZStack {
@@ -153,13 +154,16 @@ struct HomeScreen: View {
 
                             // Secondary destinations
                             VStack(spacing: 16) {
-                                DestinationCard(
-                                    icon: Image("file_text", bundle: nil),
-                                    title: "Transcript",
-                                    description: "Read captions in a text-only view.",
-                                    hasArrow: true,
-                                    action: {}
-                                )
+                                Button(action: onOpenTranscript) {
+                                    DestinationCard(
+                                        icon: Image("file_text", bundle: nil),
+                                        title: "Transcript",
+                                        description: "Read captions in a text-only view.",
+                                        hasArrow: true,
+                                        action: {}
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle())
 
                                 Button(action: onOpenSettings) {
                                     DestinationCard(

@@ -6,6 +6,7 @@ import GraptionUI
 @MainActor
 struct ContentView: View {
     @State private var showHomeScreen = true
+    @State private var showTranscript = false
     @State private var capture: MicrophoneCapture?
     @StateObject private var toneMonitor = ToneConnectionMonitor(
         configuration: ToneClientConfiguration.fromAppConfiguration(
@@ -46,12 +47,31 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if showHomeScreen {
+            if showTranscript {
+                TranscriptScreen(
+                    captions: captions.map { entry in
+                        TranscriptCaption(
+                            id: entry.id,
+                            speaker: "Someone",
+                            text: entry.text,
+                            tone: nil
+                        )
+                    },
+                    onHome: {
+                        showTranscript = false
+                        showHomeScreen = true
+                    }
+                )
+            } else if showHomeScreen {
                 HomeScreen(
                     onOpenLiveCaptions: {
                         showHomeScreen = false
                     },
                     onOpenSettings: {
+                        showHomeScreen = false
+                    },
+                    onOpenTranscript: {
+                        showTranscript = true
                         showHomeScreen = false
                     }
                 )
