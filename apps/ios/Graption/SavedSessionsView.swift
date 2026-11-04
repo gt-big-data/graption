@@ -1,5 +1,6 @@
 import SwiftUI
 import GraptionCore
+import UniformTypeIdentifiers
 
 @MainActor
 struct SavedSessionsView: View {
@@ -44,6 +45,7 @@ struct SavedSessionsView: View {
                                 }
                             }
                             .navigationTitle("Saved transcript")
+                            .toolbar { ShareLink(item: ExportDocument(sessions: [session]), preview: SharePreview("Graption meetings")) { Label("Export", systemImage: "square.and.arrow.up") } }
                         } label: {
                             VStack(alignment: .leading) {
                                 Text(session.startedAt.formatted(date: .abbreviated, time: .standard))
@@ -59,6 +61,11 @@ struct SavedSessionsView: View {
             }
             .navigationTitle("Saved sessions")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    if !sessions.isEmpty {
+                        ShareLink(item: ExportDocument(sessions: sessions), preview: SharePreview("Graption meetings")) { Label("Export all", systemImage: "square.and.arrow.up") }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
@@ -141,4 +148,21 @@ private struct CaptionRow: View {
 
 #Preview {
     ContentView()
+}
+
+private struct ExportDocument: Transferable {
+    let sessions: [SavedSession]
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .json) { document in
+            let data = try SessionExport.encode(document.sessions, appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd"
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent("graption-meetings-\(formatter.string(from: Date())).json")
+            try data.write(to: url, options: .atomic)
+            return SentTransferredFile(url)
+        }
+    }
 }
