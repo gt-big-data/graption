@@ -47,9 +47,14 @@ struct ContentView: View {
     var body: some View {
         Group {
             if showHomeScreen {
-                HomeScreen(onOpenLiveCaptions: {
-                    showHomeScreen = false
-                })
+                HomeScreen(
+                    onOpenLiveCaptions: {
+                        showHomeScreen = false
+                    },
+                    onOpenSettings: {
+                        showHomeScreen = false
+                    }
+                )
             } else if isReady {
                 LiveCaptionScreen(
                     cameraPreviewDestination: { AnyView(CameraView(captions: bubbleCaptions)) },

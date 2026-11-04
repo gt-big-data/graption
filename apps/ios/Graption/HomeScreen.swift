@@ -11,6 +11,7 @@ import GraptionUI
 struct HomeScreen: View {
     @Environment(\.dismiss) private var dismiss
     var onOpenLiveCaptions: () -> Void = {}
+    var onOpenSettings: () -> Void = {}
 
     var body: some View {
         ZStack {
@@ -156,17 +157,22 @@ struct HomeScreen: View {
                                     icon: Image("file_text", bundle: nil),
                                     title: "Transcript",
                                     description: "Read captions in a text-only view.",
-                                    hasArrow: true
+                                    hasArrow: true,
+                                    action: {}
                                 )
 
-                                DestinationCard(
-                                    icon: Image("preferences", bundle: nil),
-                                    title: "Connection & Preferences",
-                                    description: "Set up your Mac server and tone tags.",
-                                    statusIcon: Image("disconnected_indicator", bundle: nil),
-                                    statusText: "Mac server · Not connected",
-                                    hasArrow: true
-                                )
+                                Button(action: onOpenSettings) {
+                                    DestinationCard(
+                                        icon: Image("preferences", bundle: nil),
+                                        title: "Connection & Preferences",
+                                        description: "Set up your Mac server and tone tags.",
+                                        statusIcon: Image("disconnected_indicator", bundle: nil),
+                                        statusText: "Mac server · Not connected",
+                                        hasArrow: true,
+                                        action: {}
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle())
                             }
                         }
                     }
@@ -184,6 +190,7 @@ struct DestinationCard: View {
     let statusIcon: Image?
     let statusText: String?
     let hasArrow: Bool
+    let action: () -> Void
 
     init(
         icon: Image,
@@ -191,7 +198,8 @@ struct DestinationCard: View {
         description: String,
         statusIcon: Image? = nil,
         statusText: String? = nil,
-        hasArrow: Bool = false
+        hasArrow: Bool = false,
+        action: @escaping () -> Void = {}
     ) {
         self.icon = icon
         self.title = title
@@ -199,6 +207,7 @@ struct DestinationCard: View {
         self.statusIcon = statusIcon
         self.statusText = statusText
         self.hasArrow = hasArrow
+        self.action = action
     }
 
     var body: some View {
