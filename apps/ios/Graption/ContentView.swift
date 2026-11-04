@@ -5,6 +5,7 @@ import GraptionUI
 
 @MainActor
 struct ContentView: View {
+    @State private var showHomeScreen = true
     @State private var capture: MicrophoneCapture?
     @StateObject private var toneMonitor = ToneConnectionMonitor(
         configuration: ToneClientConfiguration.fromAppConfiguration(
@@ -45,7 +46,11 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if isReady {
+            if showHomeScreen {
+                HomeScreen(onOpenLiveCaptions: {
+                    showHomeScreen = false
+                })
+            } else if isReady {
                 LiveCaptionScreen(
                     cameraPreviewDestination: { AnyView(CameraView(captions: bubbleCaptions)) },
                     captions: bubbleCaptions,
@@ -61,7 +66,10 @@ struct ContentView: View {
                         }
                     },
                     calibrationCount: calibrationCount,
-                    isSettingUp: isPreparing
+                    isSettingUp: isPreparing,
+                    onHome: {
+                        showHomeScreen = true
+                    }
                 )
             } else {
                 InstallBaseEnPage(isInstalling: isPreparing, detail: setupFailed ? status : nil) {

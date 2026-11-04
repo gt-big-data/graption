@@ -19,6 +19,7 @@ public struct LiveCaptionScreen: View {
     private let isCalibrating: Bool
     private let calibrationCount: Int?
     private let isSettingUp: Bool
+    private let onHome: (() -> Void)?
 
     public init(
         cameraPreviewDestination: (() -> AnyView)? = nil,
@@ -33,7 +34,8 @@ public struct LiveCaptionScreen: View {
         onCalibrate: (() -> Void)? = nil,
         isCalibrating: Bool = false,
         calibrationCount: Int? = nil,
-        isSettingUp: Bool = false
+        isSettingUp: Bool = false,
+        onHome: (() -> Void)? = nil
     ) {
         self.cameraPreviewDestination = cameraPreviewDestination
         self.suppliedCaptions = captions
@@ -48,6 +50,7 @@ public struct LiveCaptionScreen: View {
         self.isCalibrating = isCalibrating
         self.calibrationCount = calibrationCount
         self.isSettingUp = isSettingUp
+        self.onHome = onHome
     }
 
     private var usesLiveAudio: Bool { onMicrophone != nil }
@@ -73,6 +76,7 @@ public struct LiveCaptionScreen: View {
         VStack(spacing: 0) {
             CaptionHeaderView(
                 subtitle: statusText ?? "Graption • Live camera",
+                onBack: { onHome?() },
                 onSettings: { showSettings = true }
             )
             .dynamicTypeSize(...DynamicTypeSize.accessibility1)
