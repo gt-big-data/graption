@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://graption.app/schemas/session_export.schema.json",
+  "title": "SessionExport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "export_version",
+    "exported_at",
+    "sessions"
+  ],
+  "properties": {
+    "export_version": {
+      "const": "1"
+    },
+    "exported_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "app_version": {
+      "type": "string"
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "started_at",
+          "duration",
+          "captions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "duration": {
+            "type": "number",
+            "minimum": 0
+          },
+          "captions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "caption_id",
+                "text",
+                "speaker_id",
+                "tone_tag",
+                "t_start",
+                "t_end",
+                "model_versions"
+              ],
+              "properties": {
+                "caption_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "speaker_id": {
+                  "type": "string"
+                },
+                "tone_tag": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "t_start": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "t_end": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "model_versions": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "asr"
+                  ],
+                  "properties": {
+                    "asr": {
+                      "type": "string"
+                    },
+                    "asd": {
+                      "type": "string"
+                    },
+                    "tone": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
