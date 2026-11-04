@@ -7,6 +7,7 @@ import GraptionUI
 struct ContentView: View {
     @State private var showHomeScreen = true
     @State private var showTranscript = false
+    @State private var showSettings = false
     @State private var capture: MicrophoneCapture?
     @StateObject private var toneMonitor = ToneConnectionMonitor(
         configuration: ToneClientConfiguration.fromAppConfiguration(
@@ -47,7 +48,15 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if showTranscript {
+            if showSettings {
+                SettingsScreen(
+                    cameraPreviewDestination: { AnyView(CameraView(captions: bubbleCaptions)) },
+                    onBack: {
+                        showSettings = false
+                        showHomeScreen = true
+                    }
+                )
+            } else if showTranscript {
                 TranscriptScreen(
                     captions: captions.map { entry in
                         TranscriptCaption(
@@ -68,6 +77,7 @@ struct ContentView: View {
                         showHomeScreen = false
                     },
                     onOpenSettings: {
+                        showSettings = true
                         showHomeScreen = false
                     },
                     onOpenTranscript: {
