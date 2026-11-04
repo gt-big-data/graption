@@ -19,13 +19,13 @@ Wi-Fi or phone hotspot, the phone connects to
 ## Session protocol
 
 Send JSON text frames matching `schemas/events.schema.json`, including `session_id`
-and `schema_version: "1.2"`. Example sentence audio (PCM16 mono little-endian, base64):
+and `schema_version: "1.3"`. Example sentence audio (PCM16 mono little-endian, base64):
 
 ```json
 {
   "type": "tone_request",
   "session_id": "demo",
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "caption_id": "3f1c2a9e-8b7d-4c6e-9a01-2b3c4d5e6f70",
   "t_start": 1.0,
   "t_end": 1.1,
@@ -45,7 +45,7 @@ Invalid messages receive a `session_error` reply and the connection stays open:
 {
   "type": "session_error",
   "session_id": "demo",
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "code": "invalid_json",
   "message": "Invalid JSON at line 1, column 1: Expecting value",
   "request": "not json",
@@ -164,3 +164,41 @@ uv run datamodel-codegen \
 
 Later: the custom WavLM backend, SQLite logging, and Docker packaging. Add server dependencies with
 `uv add --package graption-server <pkg>`; tests live in `server/tests/`.
+
+
+## Optional Mac transcription
+
+The separate `/ws/asr` endpoint accepts finished 16 kHz mono PCM16 segments and
+returns one final transcript per request. It does not store or log request audio.
+The mock backend returns unavailable, so the app falls back to WhisperKit.
+
+On Apple Silicon, install the optional runtime and cache a checkpoint before startup:
+
+```sh
+uv sync --package graption-server --extra asr
+uv run --no-sync python - <<'PYMODEL'
+from pathlib import Path
+from huggingface_hub import snapshot_download
+print(snapshot_download(
+    "mlx-community/whisper-base.en-mlx",
+    revision="aa0678c3466ed62c5c6114ec600a0e1f96820089",
+    cache_dir=Path.home() / "Library/Caches/Graption/huggingface",
+    allow_patterns=["config.json", "weights.npz"],
+))
+PYMODEL
+```
+
+From the repository root, set `ASR_MODEL_PATH` to the printed snapshot path:
+
+```sh
+ASR_BACKEND=mlx \
+ASR_MODEL_PATH="/path/to/cached/snapshot" \
+ASR_MODEL_REVISION=aa0678c3466ed62c5c6114ec600a0e1f96820089 \
+uv run --no-sync uvicorn app.main:app --app-dir server --host 0.0.0.0 --port 8000 \
+  --ws-max-size 450000 --log-level info
+```
+
+Set `ASR_TOKEN` in the server environment and local iOS configuration if using
+authentication (required outside local deployment mode). Use plain WS only on a
+trusted local network. Keep uvicorn frame logging disabled. Both app and server
+must use schema 1.3; rebuild the phone app when updating the server.

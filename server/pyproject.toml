@@ -20,3 +20,6 @@ dev-mode-dirs = ["."]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[project.optional-dependencies]
+asr = ["mlx-whisper>=0.4.3; sys_platform == 'darwin' and platform_machine == 'arm64'"]

@@ -108,7 +108,7 @@ public actor ToneClient {
         }
     }
 
-    /// Sends one VAD segment as the schema-v1.2 tone_request text frame expected by P2.
+    /// Sends one VAD segment as the schema-v1.3 tone_request text frame expected by P2.
     public func sendToneRequest(
         captionID: String,
         tStart: Double,
@@ -118,14 +118,17 @@ public actor ToneClient {
     ) async throws {
         if socket == nil { try connect() }
         let event = Events(
-            schemaVersion: .the12,
+            faces: nil, schemaVersion: .the13,
             sessionID: configuration.sessionID,
-            type: .toneRequest,
+            t: nil, type: .toneRequest,
             captionID: captionID,
-            tEnd: tEnd,
+            modelVersions: nil, speakerID: nil, tEnd: tEnd,
             tStart: tStart,
-            audioB64: pcm16.base64EncodedString(),
-            sampleRate: sampleRate
+            text: nil, confidence: nil, label: nil, audioB64: pcm16.base64EncodedString(),
+            sampleRate: sampleRate,
+            caption: nil, toneTag: nil, latencyMS: nil, modelVersion: nil,
+            probs: nil, scores: nil, tag: nil, code: nil, message: nil,
+            request: nil, requestEncoding: nil, status: nil
         )
         let data = try JSONEncoder().encode(event)
         guard let text = String(data: data, encoding: .utf8), let socket else {

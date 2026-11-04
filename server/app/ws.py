@@ -47,7 +47,7 @@ async def send_error(
         {
             "type": "session_error",
             "session_id": session_id,
-            "schema_version": "1.2",
+            "schema_version": "1.3",
             "code": code,
             "message": message,
             "request": request,
@@ -252,7 +252,7 @@ async def session(websocket: WebSocket, session_id: str = Query(min_length=1)) -
                 {
                     "type": "tone_result",
                     "session_id": session_id,
-                    "schema_version": "1.2",
+                    "schema_version": "1.3",
                     "caption_id": caption_id,
                     "tag": prediction.tag,
                     "probs": prediction.probs,
@@ -260,7 +260,8 @@ async def session(websocket: WebSocket, session_id: str = Query(min_length=1)) -
                     "latency_ms": {"recv_to_send": (perf_counter() - received_at) * 1000},
                 }
             )
-            encoded = result.model_dump_json()
+            # Keep required tag:null, but omit optional fields absent from the prediction.
+            encoded = result.model_dump_json(exclude_unset=True)
             send_started = perf_counter()
             await websocket.send_text(encoded)
             send_ms = (perf_counter() - send_started) * 1000
