@@ -84,14 +84,16 @@ def extract_head_ypr(facial_transformation_matrix):
     
     return [yaw, pitch, roll]
 
-def extract_full_featureVec(face_landmarks, face_blendshapes, facial_transformation_matrix, image_width, image_height):
+def extract_full_featureVec(
+    face_landmarks,
+    face_blendshapes,
+    facial_transformation_matrix,
+    image_width,
+    image_height,
+):
     lip_features = extract_lip_features(face_landmarks, image_width, image_height)
     head_ypr = extract_head_ypr(facial_transformation_matrix)
     blendshape_values = extract_face_blendshapes(face_blendshapes)
-    
+
     # Full 96-value feature vector
     return lip_features + head_ypr + blendshape_values + [loudness]
-
-
-
-
