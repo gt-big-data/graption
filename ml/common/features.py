@@ -75,13 +75,12 @@ def extract_face_blendshapes(face_blendshapes):
     return face_blendshape_values
 
 def extract_head_ypr(facial_transformation_matrix):
-    
     r = np.asarray(facial_transformation_matrix)[:3, :3]
-    
+
     yaw = math.atan2(r[0, 2], r[2, 2])
     pitch = math.asin(max(-1.0, min(1.0, -r[1, 2])))
     roll = math.atan2(r[1, 0], r[1, 1])
-    
+
     return [yaw, pitch, roll]
 
 def extract_full_featureVec(
