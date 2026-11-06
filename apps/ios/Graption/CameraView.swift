@@ -735,6 +735,7 @@ struct CameraView: View {
                                     id: face.id,
                                     box: face.box,
                                     hasLandmarks: face.hasLandmarks,
+                                    transform: face.transform,
                                     isSpeaker: face.id == controller.speakerID,
                                     size: geometry.size,
                                     sourceAspectRatio: controller.captureAspectRatio,
@@ -823,9 +824,19 @@ struct CameraView: View {
 /// (usually a face too small or turned away for landmarks).
 /// The outline uses the active caption's speaker color. The label still shows the track id.
 private struct FaceBox: View {
+    #if DEBUG
+    static func headPoseText(_ transform: simd_float4x4?) -> String {
+        guard let transform else { return "no pose" }
+        let degrees = FeatureBuilder.headPose(transform).map { Int(($0 * 180 / .pi).rounded()) }
+        return "yaw \(degrees[0])° pitch \(degrees[1])° roll \(degrees[2])°"
+    }
+    #endif
+
     let id: String
     let box: CGRect
     let hasLandmarks: Bool
+    /// MediaPipe's facial transformation matrix; drives the debug head-pose readout.
+    let transform: simd_float4x4?
     let isSpeaker: Bool
     let size: CGSize
     let sourceAspectRatio: CGFloat
@@ -853,6 +864,19 @@ private struct FaceBox: View {
                     .background(color)
                     .offset(y: -18)
             }
+            #if DEBUG
+            // Head-pose check (GRAPTION_CONTEXT.md §6): the same yaw/pitch/roll the speaker
+            // model gets (features 92-94), in degrees. Debug builds only; Release omits it.
+            .overlay(alignment: .bottomLeading) {
+                Text(Self.headPoseText(transform))
+                    .font(.caption.monospacedDigit().weight(.bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 4)
+                    .background(color)
+                    .fixedSize()
+                    .offset(y: 18)
+            }
+            #endif
             .position(
                 x: box.midX * renderedWidth - horizontalCrop,
                 y: box.midY * renderedHeight - verticalCrop

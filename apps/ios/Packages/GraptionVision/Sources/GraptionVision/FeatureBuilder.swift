@@ -143,7 +143,7 @@ public enum FeatureBuilder {
 
     /// yaw, pitch, roll (radians) with R = Ry(yaw) Rx(pitch) Rz(roll). Mirrors `extract_head_ypr`.
     /// `simd_float4x4` is column-major, so row `r`, column `c` is `matrix[c][r]`.
-    static func headPose(_ matrix: simd_float4x4) -> [Double] {
+    public static func headPose(_ matrix: simd_float4x4) -> [Double] {
         func r(_ row: Int, _ column: Int) -> Double { Double(matrix[column][row]) }
         let yaw = atan2(r(0, 2), r(2, 2))
         let pitch = asin(max(-1.0, min(1.0, -r(1, 2))))
