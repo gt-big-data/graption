@@ -12,11 +12,27 @@ def test_layout_is_locked():
     assert len(set(F.LIP_LANDMARKS)) == 40
 
 
+# Same structure, floats equal to within 1e-12. Not exact: libm (asin, atan2, hypot) can differ
+# in the last bit between macOS and the Linux CI runner.
+def _assert_close(actual, expected, path="fixture"):
+    if isinstance(expected, float) or isinstance(actual, float):
+        assert actual == pytest.approx(expected, rel=1e-12, abs=1e-12), path
+    elif isinstance(expected, dict):
+        assert isinstance(actual, dict) and actual.keys() == expected.keys(), path
+        for key in expected:
+            _assert_close(actual[key], expected[key], f"{path}.{key}")
+    elif isinstance(expected, list):
+        assert isinstance(actual, list) and len(actual) == len(expected), path
+        for i, (a, e) in enumerate(zip(actual, expected, strict=True)):
+            _assert_close(a, e, f"{path}[{i}]")
+    else:
+        assert actual == expected, path
+
+
 def test_committed_fixtures_are_current():
+    """Fails if features.py changed without `uv run python ml/common/make_fixtures.py`."""
     committed = json.loads(make_fixtures.FIXTURE_PATH.read_text())
-    assert committed == json.loads(make_fixtures.render()), (
-        "fixtures are stale: run `uv run python ml/common/make_fixtures.py`"
-    )
+    _assert_close(json.loads(make_fixtures.render()), committed)
 
 
 def test_block_order_lips_blendshapes_pose_loudness():
@@ -78,7 +94,7 @@ def test_face_features_or_none():
     case = json.loads(make_fixtures.FIXTURE_PATH.read_text())["cases"][0]
     args = (case["landmarks"], case["blendshapes"], case["facial_transformation_matrix"])
     size = (case["image_width"], case["image_height"])
-    assert F.face_features_or_none(*args, *size) == case["expected"][:95]
+    assert F.face_features_or_none(*args, *size) == pytest.approx(case["expected"][:95], abs=1e-12)
     assert F.face_features_or_none([], case["blendshapes"], args[2], *size) is None
     assert F.face_features_or_none(args[0], None, args[2], *size) is None
     assert F.face_features_or_none(args[0], [], args[2], *size) is None
