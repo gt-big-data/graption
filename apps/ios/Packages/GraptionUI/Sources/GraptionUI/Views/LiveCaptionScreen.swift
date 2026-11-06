@@ -82,7 +82,7 @@ public struct LiveCaptionScreen: View {
     }
 
     private var screenContent: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topTrailing) {
             VStack(spacing: 0) {
                 if let alert = displayedAlert {
                     SoundAlertBannerView(alert: alert)

@@ -52,12 +52,11 @@ struct ContentView: View {
             }
     }
 
-    /// How long a caption stays over the camera: reading time at 3 words per second
-    /// (180 wpm, the upper end of broadcast subtitle guidance), held for 3 to 7 seconds.
-    /// 7 s is the common per-subtitle maximum (e.g. Netflix, BBC).
+    /// How long a caption stays over the camera: reading time at 2.5 words per second
+    /// (150 wpm, the adult rate in DCMP captioning guidance), held for 4 to 8 seconds.
     static func onScreenSeconds(for text: String) -> Double {
         let words = text.split(whereSeparator: \.isWhitespace).count
-        return min(7, max(3, Double(words) / 3))
+        return min(8, max(4, Double(words) / 2.5))
     }
 
     private func scheduleExpiry(of entry: CaptionEntry) {
