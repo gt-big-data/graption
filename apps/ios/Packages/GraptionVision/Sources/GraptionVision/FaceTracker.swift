@@ -9,16 +9,28 @@
 
 import CoreGraphics
 import Foundation
+import simd
 
 /// one detected face in one frame before tracking.
 /// `box` and `landmarks` are normalized to the full portrait frame with a top left origin.
+/// `blendshapes` (name to score) and `transform` (mediapipe's facial transformation matrix)
+/// come from the same mesh as `landmarks` and are empty/nil whenever it is.
 public struct FaceMeasurement: Sendable, Equatable {
     public let box: CGRect
     public let landmarks: [SIMD3<Float>]
+    public let blendshapes: [String: Float]
+    public let transform: simd_float4x4?
 
-    public init(box: CGRect, landmarks: [SIMD3<Float>] = []) {
+    public init(
+        box: CGRect,
+        landmarks: [SIMD3<Float>] = [],
+        blendshapes: [String: Float] = [:],
+        transform: simd_float4x4? = nil
+    ) {
         self.box = box
         self.landmarks = landmarks
+        self.blendshapes = blendshapes
+        self.transform = transform
     }
 }
 
@@ -29,13 +41,25 @@ public struct FaceTrack: Identifiable, Sendable, Equatable {
     public let id: String
     public let box: CGRect
     public let landmarks: [SIMD3<Float>]
+    /// mouth blendshapes etc. by mediapipe category name. empty with `landmarks`.
+    public let blendshapes: [String: Float]
+    /// mediapipe facial transformation matrix. nil with `landmarks`.
+    public let transform: simd_float4x4?
 
     public var hasLandmarks: Bool { !landmarks.isEmpty }
 
-    public init(id: String, box: CGRect, landmarks: [SIMD3<Float>] = []) {
+    public init(
+        id: String,
+        box: CGRect,
+        landmarks: [SIMD3<Float>] = [],
+        blendshapes: [String: Float] = [:],
+        transform: simd_float4x4? = nil
+    ) {
         self.id = id
         self.box = box
         self.landmarks = landmarks
+        self.blendshapes = blendshapes
+        self.transform = transform
     }
 }
 
@@ -161,6 +185,8 @@ private struct TrackedFace: Sendable {
     let id: String
     var box: CGRect
     var landmarks: [SIMD3<Float>] = []
+    var blendshapes: [String: Float] = [:]
+    var transform: simd_float4x4?
     var velocity = CGPoint.zero
     var missedFrames = 0
     /// last time a face was matched. drives the `maxUnseen` cutoff.
@@ -195,6 +221,8 @@ private struct TrackedFace: Sendable {
         }
         box = filtered
         landmarks = measurement.landmarks
+        blendshapes = measurement.blendshapes
+        transform = measurement.transform
         missedFrames = 0
         lastSeen = timestamp
         lastTimestamp = timestamp
@@ -212,9 +240,13 @@ private struct TrackedFace: Sendable {
         velocity.y *= decay
         // landmarks from an older frame would not line up with the predicted box.
         landmarks = []
+        blendshapes = [:]
+        transform = nil
         missedFrames += 1
         lastTimestamp = timestamp
     }
 
-    var output: FaceTrack { FaceTrack(id: id, box: box, landmarks: landmarks) }
+    var output: FaceTrack {
+        FaceTrack(id: id, box: box, landmarks: landmarks, blendshapes: blendshapes, transform: transform)
+    }
 }

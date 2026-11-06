@@ -11,6 +11,7 @@ import Accelerate
 import Combine
 import UIKit
 import Vision
+import simd
 import MediaPipeTasksVision
 import GraptionUI
 import GraptionVision
@@ -177,8 +178,11 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
             }
             options.minFaceDetectionConfidence = 0.5
             options.minFacePresenceConfidence = 0.5
-            options.outputFaceBlendshapes = false
-            options.outputFacialTransformationMatrixes = false
+            // FeatureBuilder needs both: 12 mouth blendshapes and head pose from the matrix
+            // (GRAPTION_CONTEXT.md §6). With face crops the matrix's rotation is relative to
+            // the line of sight to that face; training crops the same way (§8).
+            options.outputFaceBlendshapes = true
+            options.outputFacialTransformationMatrixes = true
             let landmarker = try FaceLandmarker(options: options)
             let pool = landmarkMode == .faceCrops ? makeCropPool() : nil
             videoQueue.sync {
@@ -251,7 +255,9 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         let boxes = visionFaceBoxes(in: pixelBuffer)
         switch landmarkMode {
         case .faceCrops:
-            return boxes.map { FaceMeasurement(box: $0, landmarks: landmarks(around: $0, in: pixelBuffer)) }
+            return boxes.map { box in
+                landmarks(around: box, in: pixelBuffer)?.measurement(box: box) ?? FaceMeasurement(box: box)
+            }
         case .fullFrame:
             return attach(fullFrameMeshes(in: pixelBuffer, timestamp: timestamp), to: boxes)
         }
@@ -283,7 +289,7 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     }
 
     /// Runs MediaPipe once on the whole frame and returns every mesh it found.
-    private func fullFrameMeshes(in pixelBuffer: CVPixelBuffer, timestamp: Double) -> [[SIMD3<Float>]] {
+    private func fullFrameMeshes(in pixelBuffer: CVPixelBuffer, timestamp: Double) -> [FaceMesh] {
         guard let faceLandmarker else { return [] }
         // Video mode rejects non-increasing timestamps.
         let timestampInMilliseconds = Int(timestamp * 1_000)
@@ -295,7 +301,13 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
                 videoFrame: try MPImage(pixelBuffer: pixelBuffer),
                 timestampInMilliseconds: timestampInMilliseconds
             )
-            return result.faceLandmarks.map { face in face.map { SIMD3($0.x, $0.y, $0.z) } }
+            return result.faceLandmarks.indices.map { index in
+                FaceMesh(
+                    landmarks: result.faceLandmarks[index].map { SIMD3($0.x, $0.y, $0.z) },
+                    result: result,
+                    index: index
+                )
+            }
         } catch {
             print("MediaPipe detection error: \(error.localizedDescription)")
             return []
@@ -304,19 +316,22 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
 
     /// Pairs each Vision box with the mesh whose nose tip falls inside it. Meshes Vision
     /// missed still become measurements, boxed by their landmarks.
-    private func attach(_ meshes: [[SIMD3<Float>]], to boxes: [CGRect]) -> [FaceMeasurement] {
-        var unclaimed = meshes.filter { $0.count > 1 }
+    private func attach(_ meshes: [FaceMesh], to boxes: [CGRect]) -> [FaceMeasurement] {
+        var unclaimed = meshes.filter { $0.landmarks.count > 1 }
         var measurements = boxes.map { box -> FaceMeasurement in
             let searchArea = box.insetBy(dx: -box.width * 0.25, dy: -box.height * 0.25)
             let match = unclaimed.indices
-                .map { index in (index, CGPoint(x: CGFloat(unclaimed[index][1].x), y: CGFloat(unclaimed[index][1].y))) }
+                .map { index in
+                    let nose = unclaimed[index].landmarks[1]
+                    return (index, CGPoint(x: CGFloat(nose.x), y: CGFloat(nose.y)))
+                }
                 .filter { searchArea.contains($0.1) }
                 .min { hypot($0.1.x - box.midX, $0.1.y - box.midY) < hypot($1.1.x - box.midX, $1.1.y - box.midY) }
             guard let match else { return FaceMeasurement(box: box, landmarks: []) }
-            return FaceMeasurement(box: box, landmarks: unclaimed.remove(at: match.0))
+            return unclaimed.remove(at: match.0).measurement(box: box)
         }
         for mesh in unclaimed where measurements.count < Self.maxFaces {
-            measurements.append(FaceMeasurement(box: boundingBox(of: mesh), landmarks: mesh))
+            measurements.append(mesh.measurement(box: boundingBox(of: mesh.landmarks)))
         }
         return measurements
     }
@@ -340,16 +355,17 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     }
 
     /// Runs MediaPipe on a square crop centered on `box` and returns the mesh in full-frame
-    /// normalized coordinates, or an empty array if no face is found in the crop.
-    private func landmarks(around box: CGRect, in pixelBuffer: CVPixelBuffer) -> [SIMD3<Float>] {
+    /// normalized coordinates, or nil if no face is found in the crop. Blendshapes and the
+    /// transformation matrix come from the crop as-is (rotation only is used downstream).
+    private func landmarks(around box: CGRect, in pixelBuffer: CVPixelBuffer) -> FaceMesh? {
         guard let faceLandmarker,
-              CVPixelBufferGetPixelFormatType(pixelBuffer) == kCVPixelFormatType_32BGRA else { return [] }
+              CVPixelBufferGetPixelFormatType(pixelBuffer) == kCVPixelFormatType_32BGRA else { return nil }
 
         let frameWidth = CVPixelBufferGetWidth(pixelBuffer)
         let frameHeight = CVPixelBufferGetHeight(pixelBuffer)
         let faceSide = max(box.width * CGFloat(frameWidth), box.height * CGFloat(frameHeight))
         let side = min(Int(faceSide * Self.cropScale), frameWidth, frameHeight)
-        guard side >= 16 else { return [] }
+        guard side >= 16 else { return nil }
         // Shift (not shrink) the crop to stay inside the frame so it remains square.
         let originX = min(max(Int(box.midX * CGFloat(frameWidth)) - side / 2, 0), frameWidth - side)
         let originY = min(max(Int(box.midY * CGFloat(frameHeight)) - side / 2, 0), frameHeight - side)
@@ -359,39 +375,41 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
             originX: originX,
             originY: originY,
             side: side
-        ) else { return [] }
+        ) else { return nil }
 
         let result: FaceLandmarkerResult
         do {
             result = try faceLandmarker.detect(image: try MPImage(pixelBuffer: crop))
         } catch {
             print("MediaPipe detection error: \(error.localizedDescription)")
-            return []
+            return nil
         }
 
         // Of the faces found in the crop, keep the one nearest its center (the Vision face).
-        let best = result.faceLandmarks
-            .map { face -> (face: [NormalizedLandmark], distance: Float) in
+        let best = result.faceLandmarks.indices
+            .map { index -> (index: Int, distance: Float) in
+                let face = result.faceLandmarks[index]
                 // Mesh index 1 is the nose tip.
-                guard face.count > 1 else { return (face, .greatestFiniteMagnitude) }
+                guard face.count > 1 else { return (index, .greatestFiniteMagnitude) }
                 let nose = face[1]
-                return (face, hypotf(nose.x - 0.5, nose.y - 0.5))
+                return (index, hypotf(nose.x - 0.5, nose.y - 0.5))
             }
             .min { $0.distance < $1.distance }
-        guard let best, best.distance < 0.25 else { return [] }
+        guard let best, best.distance < 0.25 else { return nil }
 
         let scale = Float(side)
         let width = Float(frameWidth)
         let height = Float(frameHeight)
         let offsetX = Float(originX)
         let offsetY = Float(originY)
-        return best.face.map { landmark in
+        let landmarks = result.faceLandmarks[best.index].map { landmark in
             SIMD3(
                 (offsetX + landmark.x * scale) / width,
                 (offsetY + landmark.y * scale) / height,
                 landmark.z * scale / width
             )
         }
+        return FaceMesh(landmarks: landmarks, result: result, index: best.index)
     }
 
     private func makeCrop(
@@ -486,6 +504,37 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         } catch {
             print("Camera configuration error: \(error.localizedDescription)")
         }
+    }
+}
+
+/// One MediaPipe face: landmarks in full-frame coordinates plus the blendshapes and
+/// transformation matrix from the same result index.
+nonisolated struct FaceMesh {
+    let landmarks: [SIMD3<Float>]
+    let blendshapes: [String: Float]
+    let transform: simd_float4x4?
+
+    init(landmarks: [SIMD3<Float>], result: FaceLandmarkerResult, index: Int) {
+        self.landmarks = landmarks
+        var scores: [String: Float] = [:]
+        if index < result.faceBlendshapes.count {
+            for category in result.faceBlendshapes[index].categories {
+                if let name = category.categoryName { scores[name] = category.score }
+            }
+        }
+        blendshapes = scores
+        if index < result.facialTransformationMatrixes.count {
+            let matrix = result.facialTransformationMatrixes[index]
+            transform = matrix.rows == 4 && matrix.columns == 4
+                ? FeatureBuilder.matrix { matrix.value(atRow: UInt($0), column: UInt($1)) }
+                : nil
+        } else {
+            transform = nil
+        }
+    }
+
+    func measurement(box: CGRect) -> FaceMeasurement {
+        FaceMeasurement(box: box, landmarks: landmarks, blendshapes: blendshapes, transform: transform)
     }
 }
 
