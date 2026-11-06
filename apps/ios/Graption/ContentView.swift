@@ -34,6 +34,8 @@ struct ContentView: View {
     @State private var status = "Loading base.en…"
     @State private var setupFailed = false
     @State private var captions: [CaptionEntry] = []
+    /// Captions whose on-screen time is up. They leave the camera view but stay in the transcript.
+    @State private var expiredCaptionIDs: Set<UUID> = []
     @State private var listenTask: Task<Void, Never>?
 
     private var canListen: Bool {
@@ -41,10 +43,29 @@ struct ContentView: View {
             && (isRecording || (pendingCaptions == 0 && !flushingCapture))
     }
 
-    /// Newest three captions, oldest on the left, matching the three-bubble layout.
+    /// At most three unexpired captions, oldest first, matching the three-bubble layout.
     private var bubbleCaptions: [LiveCaption] {
-        captions.prefix(3).reversed().map { entry in
-            LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text)
+        Array(captions.filter { !expiredCaptionIDs.contains($0.id) }.prefix(3))
+            .reversed()
+            .map { entry in
+                LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text)
+            }
+    }
+
+    /// How long a caption stays over the camera: reading time at 3 words per second
+    /// (180 wpm, the upper end of broadcast subtitle guidance), held for 3 to 7 seconds.
+    /// 7 s is the common per-subtitle maximum (e.g. Netflix, BBC).
+    static func onScreenSeconds(for text: String) -> Double {
+        let words = text.split(whereSeparator: \.isWhitespace).count
+        return min(7, max(3, Double(words) / 3))
+    }
+
+    private func scheduleExpiry(of entry: CaptionEntry) {
+        let id = entry.id
+        let seconds = Self.onScreenSeconds(for: entry.text)
+        Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            expiredCaptionIDs.insert(id)
         }
     }
 
@@ -229,11 +250,13 @@ struct ContentView: View {
             let isShortEmpty = caption.tEnd - caption.tStart < 1 && displayText.isEmpty
             guard !isBlankAudio, !isShortEmpty else { return }
             // Stable caption IDs keep cards distinct when newer results arrive.
-            captions.insert(CaptionEntry(
+            let entry = CaptionEntry(
                 result: caption,
                 text: displayText.isEmpty ? "[No speech recognized]" : displayText,
                 transcriptionSeconds: delivery.transcriptionSeconds
-            ), at: 0)
+            )
+            captions.insert(entry, at: 0)
+            scheduleExpiry(of: entry)
         }
     }
 
@@ -273,6 +296,7 @@ struct ContentView: View {
         pipeline.reset()
         soundAlertModel.clear()
         captions.removeAll()
+        expiredCaptionIDs.removeAll()
         do {
             try capture.start(calibrating: true)
         } catch {

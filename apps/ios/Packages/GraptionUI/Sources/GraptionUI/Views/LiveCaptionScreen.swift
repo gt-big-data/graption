@@ -82,7 +82,7 @@ public struct LiveCaptionScreen: View {
     }
 
     private var screenContent: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .topTrailing) {
             VStack(spacing: 0) {
                 if let alert = displayedAlert {
                     SoundAlertBannerView(alert: alert)
@@ -167,11 +167,12 @@ public struct LiveCaptionScreen: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(displayedCaptions) { caption in
                         CaptionBubbleView(caption: caption)
+                            .transition(.opacity)
                     }
                 }
                 .padding(12)
-                .padding(.bottom, 72)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .animation(.easeOut(duration: 0.3), value: displayedCaptions.map(\.id))
             }
         }
     }
