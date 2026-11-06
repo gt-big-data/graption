@@ -777,8 +777,8 @@ struct CameraView: View {
                 .tint(.white)
             }
         }
-        // Embedded, the bottom belongs to captions and the top-right corner to the
-        // controls menu, so the flip button sits just left of the menu.
+        // Embedded, the bottom belongs to captions and the top-left corner to the
+        // controls menu, so the flip button takes the top-right corner.
         .overlay(alignment: isPresented ? .bottomTrailing : .topTrailing) {
             if controller.status == .running {
                 Button(action: controller.flipCamera) {
@@ -789,7 +789,7 @@ struct CameraView: View {
                         .background(.black.opacity(0.45), in: Circle())
                 }
                 .padding(isPresented ? .bottom : .top, isPresented ? 16 : 18)
-                .padding(.trailing, isPresented ? 16 : 84)
+                .padding(.trailing, 16)
                 .accessibilityLabel(controller.cameraPosition == .back ? "Use selfie camera" : "Use back camera")
             }
         }
