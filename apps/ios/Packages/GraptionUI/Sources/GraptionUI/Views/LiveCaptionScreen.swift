@@ -6,6 +6,11 @@ public struct LiveCaptionScreen: View {
     @State private var simulator = LiveCaptionSessionSimulator()
     @State private var showSettings = false
     @State private var showControlsMenu = false
+    @State private var pendingMenuAction: MenuAction?
+
+    private enum MenuAction {
+        case transcript, microphone, settings, home
+    }
 
     private let cameraPreviewDestination: (() -> AnyView)?
     private let suppliedCaptions: [LiveCaption]?
@@ -21,6 +26,7 @@ public struct LiveCaptionScreen: View {
     private let calibrationCount: Int?
     private let isSettingUp: Bool
     private let onHome: (() -> Void)?
+    private let onTranscript: (() -> Void)?
 
     public init(
         cameraPreviewDestination: (() -> AnyView)? = nil,
@@ -36,7 +42,8 @@ public struct LiveCaptionScreen: View {
         isCalibrating: Bool = false,
         calibrationCount: Int? = nil,
         isSettingUp: Bool = false,
-        onHome: (() -> Void)? = nil
+        onHome: (() -> Void)? = nil,
+        onTranscript: (() -> Void)? = nil
     ) {
         self.cameraPreviewDestination = cameraPreviewDestination
         self.suppliedCaptions = captions
@@ -52,6 +59,7 @@ public struct LiveCaptionScreen: View {
         self.calibrationCount = calibrationCount
         self.isSettingUp = isSettingUp
         self.onHome = onHome
+        self.onTranscript = onTranscript
     }
 
     private var usesLiveAudio: Bool { onMicrophone != nil }
@@ -95,14 +103,17 @@ public struct LiveCaptionScreen: View {
             Button(action: { showControlsMenu = true }) {
                 ZStack {
                     Circle()
-                        .fill(Color.graptionAccent)
+                        .fill(Color.graptionBackground)
+                    Circle()
+                        .stroke(Color.graptionAccent, lineWidth: 1)
 
                     Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.graptionBackground)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Color.graptionAccent)
                 }
                 .frame(width: 56, height: 56)
             }
+            .accessibilityLabel("Controls")
             .padding(16)
 
             // Calibration overlay
@@ -130,7 +141,9 @@ public struct LiveCaptionScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .animation(.easeOut(duration: 0.2), value: calibrationCount)
         .animation(.easeOut(duration: 0.3), value: displayedAlert?.message)
-        .sheet(isPresented: $showControlsMenu) {
+        // Screen changes wait for the sheet to finish closing; swapping views
+        // while it is still presented drops the navigation.
+        .sheet(isPresented: $showControlsMenu, onDismiss: runPendingMenuAction) {
             controlsMenu
         }
         .task {
@@ -201,130 +214,118 @@ public struct LiveCaptionScreen: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
 
-            ScrollView {
-                VStack(spacing: 0) {
-                    // Transcript
-                    Button(action: { showControlsMenu = false }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "doc.text")
-                                .font(.system(size: 18))
-                                .frame(width: 24)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Transcript")
-                                    .font(.system(size: 16, weight: .semibold))
-                                Text("Text-only view")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Color.graptionSecondaryText)
-                            }
-
-                            Spacer()
-
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Color.graptionSecondaryText)
-                        }
-                        .foregroundStyle(Color.graptionAccent)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Divider()
-                        .background(Color.white.opacity(0.1))
-                        .padding(.horizontal, 16)
-
-                    // Microphone
-                    Button(action: { onMicrophone?() }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "mic.fill")
-                                .font(.system(size: 18))
-                                .frame(width: 24)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Microphone")
-                                    .font(.system(size: 16, weight: .semibold))
-                            }
-
-                            Spacer()
-
-                            Text(isListening ? "On" : "Off")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Color.graptionSecondaryText)
-                        }
-                        .foregroundStyle(Color.graptionAccent)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Divider()
-                        .background(Color.white.opacity(0.1))
-                        .padding(.horizontal, 16)
-
-                    // Settings
-                    Button(action: {
-                        showControlsMenu = false
-                        showSettings = true
-                    }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "gear")
-                                .font(.system(size: 18))
-                                .frame(width: 24)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Connection & Preferences")
-                                    .font(.system(size: 16, weight: .semibold))
-                            }
-
-                            Spacer()
-
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Color.graptionSecondaryText)
-                        }
-                        .foregroundStyle(Color.graptionAccent)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Divider()
-                        .background(Color.white.opacity(0.1))
-                        .padding(.horizontal, 16)
-
-                    // Home
-                    Button(action: {
-                        showControlsMenu = false
-                        onHome?()
-                    }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "house.fill")
-                                .font(.system(size: 18))
-                                .frame(width: 24)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Back to Home")
-                                    .font(.system(size: 16, weight: .semibold))
-                            }
-
-                            Spacer()
-
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Color.graptionSecondaryText)
-                        }
-                        .foregroundStyle(Color.graptionAccent)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+            VStack(spacing: 0) {
+                menuRow(icon: "doc.text", title: "Transcript", subtitle: "Text-only view") {
+                    choose(.transcript)
+                }
+                menuDivider
+                microphoneRow
+                menuDivider
+                menuRow(icon: "gear", title: "Connection & Preferences") {
+                    choose(.settings)
+                }
+                menuDivider
+                menuRow(icon: "house.fill", title: "Back to Home") {
+                    choose(.home)
                 }
             }
+
+            Spacer(minLength: 0)
         }
         .background(Color.graptionBackground.ignoresSafeArea())
         .presentationDetents([.medium])
         .presentationCornerRadius(20)
+    }
+
+    private var microphoneRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: isListening ? "mic.fill" : "mic.slash")
+                .font(.system(size: 18))
+                .frame(width: 24)
+
+            Text("Microphone")
+                .font(.system(size: 16, weight: .semibold))
+
+            Spacer()
+
+            Text(isListening ? "On" : "Off")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.graptionSecondaryText)
+
+            Toggle("Microphone", isOn: Binding(
+                get: { isListening },
+                set: { turnOn in
+                    // Turning on starts a calibration countdown, so close the
+                    // menu first to keep the countdown visible.
+                    if turnOn { choose(.microphone) } else { onMicrophone?() }
+                }
+            ))
+            .labelsHidden()
+            .tint(Color.graptionAccent)
+            .disabled(!isListening && !canListen)
+        }
+        .foregroundStyle(Color.graptionAccent)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private var menuDivider: some View {
+        Divider()
+            .background(Color.white.opacity(0.1))
+            .padding(.horizontal, 16)
+    }
+
+    private func menuRow(
+        icon: String,
+        title: String,
+        subtitle: String? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 18))
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold))
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.graptionSecondaryText)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.graptionSecondaryText)
+            }
+            .foregroundStyle(Color.graptionAccent)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func choose(_ action: MenuAction) {
+        pendingMenuAction = action
+        showControlsMenu = false
+    }
+
+    private func runPendingMenuAction() {
+        guard let action = pendingMenuAction else { return }
+        pendingMenuAction = nil
+        switch action {
+        case .transcript: onTranscript?()
+        case .microphone: onMicrophone?()
+        case .settings: showSettings = true
+        case .home: onHome?()
+        }
     }
 }
 

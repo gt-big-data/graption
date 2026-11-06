@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var showTranscript = false
     @State private var showSettings = false
     @State private var showSavedSessions = false
+    @State private var transcriptReturnsToLive = false
     @State private var capture: MicrophoneCapture?
     @StateObject private var toneMonitor = ToneConnectionMonitor(
         configuration: ToneClientConfiguration.fromAppConfiguration(
@@ -74,7 +75,7 @@ struct ContentView: View {
                     },
                     onHome: {
                         showTranscript = false
-                        showHomeScreen = true
+                        showHomeScreen = !transcriptReturnsToLive
                     }
                 )
             } else if showHomeScreen {
@@ -88,8 +89,12 @@ struct ContentView: View {
                         showHomeScreen = false
                     },
                     onOpenTranscript: {
+                        transcriptReturnsToLive = false
                         showTranscript = true
                         showHomeScreen = false
+                    },
+                    onOpenSavedSessions: {
+                        showSavedSessions = true
                     }
                 )
             } else if isReady {
@@ -114,6 +119,10 @@ struct ContentView: View {
                         // screen-level .onDisappear doesn't fire for in-place swaps.
                         if isRecording || isCalibrating { stopListening() }
                         showHomeScreen = true
+                    },
+                    onTranscript: {
+                        transcriptReturnsToLive = true
+                        showTranscript = true
                     }
                 )
             } else {
@@ -121,15 +130,6 @@ struct ContentView: View {
                     Task { await prepareModel(allowDownload: true) }
                 }
             }
-        }
-        .overlay(alignment: .topTrailing) {
-            Button {
-                showSavedSessions = true
-            } label: {
-                Label("Saved sessions", systemImage: "clock.arrow.circlepath")
-            }
-            .buttonStyle(.borderedProminent)
-            .padding()
         }
         .sheet(isPresented: $showSavedSessions) {
             SavedSessionsView()
