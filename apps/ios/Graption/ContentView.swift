@@ -79,6 +79,7 @@ struct ContentView: View {
                 )
             } else if showHomeScreen {
                 HomeScreen(
+                    serverStatus: toneMonitor.state.label,
                     onOpenLiveCaptions: {
                         showHomeScreen = false
                     },
@@ -109,6 +110,9 @@ struct ContentView: View {
                     calibrationCount: calibrationCount,
                     isSettingUp: isPreparing,
                     onHome: {
+                        // Leaving live captions turns the microphone off; the
+                        // screen-level .onDisappear doesn't fire for in-place swaps.
+                        if isRecording || isCalibrating { stopListening() }
                         showHomeScreen = true
                     }
                 )

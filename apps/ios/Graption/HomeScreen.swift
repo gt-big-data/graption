@@ -1,15 +1,9 @@
-//
-//  HomeScreen.swift
-//  Graption
-//
-//  Created by Claude on 11/03/26.
-//
-
 import SwiftUI
 import GraptionUI
 
 struct HomeScreen: View {
-    @Environment(\.dismiss) private var dismiss
+    /// Live tone-server status, e.g. "Tone server: connected".
+    var serverStatus: String? = nil
     var onOpenLiveCaptions: () -> Void = {}
     var onOpenSettings: () -> Void = {}
     var onOpenTranscript: () -> Void = {}
@@ -19,33 +13,10 @@ struct HomeScreen: View {
             Color.graptionBackground.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Status bar
-                HStack {
-                    Text("9:41")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.graptionAccent)
-
-                    Spacer()
-
-                    HStack(spacing: 6) {
-                        Image("cellular_signal", bundle: nil)
-                            .frame(width: 18, height: 16)
-
-                        Image("wifi", bundle: nil)
-                            .frame(width: 16, height: 16)
-
-                        Image("battery", bundle: nil)
-                            .frame(width: 26, height: 16)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .frame(height: 44)
-
                 // Main content
                 ScrollView {
                     VStack(spacing: 24) {
-                        // Header with brand and help
+                        // Brand header
                         HStack {
                             HStack(spacing: 12) {
                                 ZStack {
@@ -71,19 +42,6 @@ struct HomeScreen: View {
                             }
 
                             Spacer()
-
-                            Button(action: {}) {
-                                Text("Help")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(Color.graptionAccent)
-                                    .frame(minWidth: 56)
-                                    .frame(height: 44)
-                                    .background(Color.white.opacity(0.08))
-                                    .overlay(
-                                        Capsule()
-                                            .stroke(Color.graptionAccent, lineWidth: 1)
-                                    )
-                            }
                         }
 
                         // Welcome section
@@ -170,8 +128,7 @@ struct HomeScreen: View {
                                         icon: Image("preferences", bundle: nil),
                                         title: "Connection & Preferences",
                                         description: "Set up your Mac server and tone tags.",
-                                        statusIcon: Image("disconnected_indicator", bundle: nil),
-                                        statusText: "Mac server · Not connected",
+                                        statusText: serverStatus,
                                         hasArrow: true,
                                         action: {}
                                     )
@@ -244,9 +201,9 @@ struct DestinationCard: View {
                 .foregroundStyle(Color.graptionSecondaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let statusIcon, let statusText {
+            if let statusText {
                 HStack(spacing: 6) {
-                    statusIcon
+                    statusIcon?
                         .frame(width: 6, height: 6)
 
                     Text(statusText)

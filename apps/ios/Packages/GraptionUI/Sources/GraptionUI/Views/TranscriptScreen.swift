@@ -16,29 +16,6 @@ public struct TranscriptScreen: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Status bar
-            HStack {
-                Text("9:41")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.graptionAccent)
-
-                Spacer()
-
-                HStack(spacing: 6) {
-                    Image("cellular_signal", bundle: nil)
-                        .frame(width: 18, height: 16)
-
-                    Image("wifi", bundle: nil)
-                        .frame(width: 16, height: 16)
-
-                    Image("battery", bundle: nil)
-                        .frame(width: 26, height: 16)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .frame(height: 44)
-
             // Navigation header
             HStack(spacing: 8) {
                 Button(action: { onHome?() }) {
@@ -52,6 +29,7 @@ public struct TranscriptScreen: View {
                     }
                     .frame(width: 44, height: 44)
                 }
+                .accessibilityLabel("Back to home")
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Transcript")
@@ -78,23 +56,10 @@ public struct TranscriptScreen: View {
             // Content
             ScrollView {
                 VStack(spacing: 20) {
-                    // Server status
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 6) {
-                            Image("disconnected_indicator", bundle: nil)
-                                .frame(width: 6, height: 6)
-
-                            Text("Mac server · Not connected")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Color.graptionSecondaryText)
-                        }
-
-                        Text("Captions retained from this session. No new captions while disconnected.")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(Color.graptionSecondaryText)
-                            .lineSpacing(1.5 - 1)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Captions from this session.")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(Color.graptionSecondaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
                     // Transcript panel
                     VStack(spacing: 0) {
