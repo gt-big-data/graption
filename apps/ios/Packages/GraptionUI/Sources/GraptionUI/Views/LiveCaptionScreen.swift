@@ -5,6 +5,7 @@ import SwiftUI
 public struct LiveCaptionScreen: View {
     @State private var simulator = LiveCaptionSessionSimulator()
     @State private var showSettings = false
+    @State private var showControlsMenu = false
 
     private let cameraPreviewDestination: (() -> AnyView)?
     private let suppliedCaptions: [LiveCaption]?
@@ -73,36 +74,38 @@ public struct LiveCaptionScreen: View {
     }
 
     private var screenContent: some View {
-        VStack(spacing: 0) {
-            CaptionHeaderView(
-                subtitle: statusText ?? "Graption • Live camera",
-                onBack: { onHome?() },
-                onSettings: { showSettings = true }
-            )
-            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        ZStack(alignment: .bottomTrailing) {
+            VStack(spacing: 0) {
+                if let alert = displayedAlert {
+                    SoundAlertBannerView(alert: alert)
+                        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
 
-            if let alert = displayedAlert {
-                SoundAlertBannerView(alert: alert)
-                    .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                videoArea
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if onSetup != nil || onCalibrate != nil {
+                    preparationRow
+                }
             }
+            .background(Color.graptionBackground.ignoresSafeArea())
 
-            videoArea
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Floating menu button
+            Button(action: { showControlsMenu = true }) {
+                ZStack {
+                    Circle()
+                        .fill(Color.graptionAccent)
 
-            if onSetup != nil || onCalibrate != nil {
-                preparationRow
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.graptionBackground)
+                }
+                .frame(width: 56, height: 56)
             }
+            .padding(16)
 
-            BottomControlsBar(
-                isListening: isListening,
-                canListen: canListen,
-                onMicrophone: { onMicrophone?() }
-            )
-            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        }
-        .background(Color.graptionBackground.ignoresSafeArea())
-        .overlay {
+            // Calibration overlay
             if let calibrationCount {
                 ZStack {
                     Color.black.opacity(0.55).ignoresSafeArea()
@@ -124,9 +127,12 @@ public struct LiveCaptionScreen: View {
                 .accessibilityLabel("Calibrating. Keep the room quiet. \(calibrationCount)")
             }
         }
-        .animation(.easeOut(duration: 0.2), value: calibrationCount)
         .toolbar(.hidden, for: .navigationBar)
+        .animation(.easeOut(duration: 0.2), value: calibrationCount)
         .animation(.easeOut(duration: 0.3), value: displayedAlert?.message)
+        .sheet(isPresented: $showControlsMenu) {
+            controlsMenu
+        }
         .task {
             guard !usesLiveAudio else { return }
             simulator.start()
@@ -151,6 +157,7 @@ public struct LiveCaptionScreen: View {
                     }
                 }
                 .padding(12)
+                .padding(.bottom, 72)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -173,6 +180,151 @@ public struct LiveCaptionScreen: View {
         .padding(.top, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.graptionBackground)
+    }
+
+    private var controlsMenu: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Controls")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(Color.graptionAccent)
+
+                Spacer()
+
+                Button(action: { showControlsMenu = false }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.graptionAccent)
+                        .frame(width: 44, height: 44)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Transcript
+                    Button(action: { showControlsMenu = false }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "doc.text")
+                                .font(.system(size: 18))
+                                .frame(width: 24)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Transcript")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text("Text-only view")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Color.graptionSecondaryText)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.graptionSecondaryText)
+                        }
+                        .foregroundStyle(Color.graptionAccent)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Divider()
+                        .background(Color.white.opacity(0.1))
+                        .padding(.horizontal, 16)
+
+                    // Microphone
+                    Button(action: { onMicrophone?() }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "mic.fill")
+                                .font(.system(size: 18))
+                                .frame(width: 24)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Microphone")
+                                    .font(.system(size: 16, weight: .semibold))
+                            }
+
+                            Spacer()
+
+                            Text(isListening ? "On" : "Off")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.graptionSecondaryText)
+                        }
+                        .foregroundStyle(Color.graptionAccent)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Divider()
+                        .background(Color.white.opacity(0.1))
+                        .padding(.horizontal, 16)
+
+                    // Settings
+                    Button(action: {
+                        showControlsMenu = false
+                        showSettings = true
+                    }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "gear")
+                                .font(.system(size: 18))
+                                .frame(width: 24)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Connection & Preferences")
+                                    .font(.system(size: 16, weight: .semibold))
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.graptionSecondaryText)
+                        }
+                        .foregroundStyle(Color.graptionAccent)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Divider()
+                        .background(Color.white.opacity(0.1))
+                        .padding(.horizontal, 16)
+
+                    // Home
+                    Button(action: {
+                        showControlsMenu = false
+                        onHome?()
+                    }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "house.fill")
+                                .font(.system(size: 18))
+                                .frame(width: 24)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Back to Home")
+                                    .font(.system(size: 16, weight: .semibold))
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.graptionSecondaryText)
+                        }
+                        .foregroundStyle(Color.graptionAccent)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .background(Color.graptionBackground.ignoresSafeArea())
+        .presentationDetents([.medium])
+        .presentationCornerRadius(20)
     }
 }
 
