@@ -20,7 +20,7 @@ Example output:
 - **iOS only.** No Android.
 - **Training compute:** the team's M-series Macs (PyTorch on `mps`). Training is never part of the live app.
 - **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi (tone model only).
-- **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network. Only tone tags may depend on a server (Mac or cloud).
+- **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network. Tone may depend on a server; optional Mac ASR must fall back to on-device WhisperKit.
 - **User testing:** DHH testers use the app on their own phones at home via TestFlight. Their phones can't reach the dev Mac, which is why the tone server must also run in the cloud (or behind a tunnel).
 
 ### Non-goals (semester one)
@@ -153,7 +153,7 @@ The repo starts with only READMEs in most folders; each team creates the files a
 All timestamps are **seconds since session start, measured on the phone's monotonic host clock**. Convert camera and audio `CMSampleBuffer` presentation timestamps to host time. The Mac never generates timestamps used for alignment.
 
 ### Event schema (`schemas/events.schema.json`)
-Every event includes `type`, `session_id`, and `schema_version` (currently `"1.2"`).
+Every event includes `type`, `session_id`, and `schema_version` (currently `"1.3"`).
 
 **On-device (Swift types, generated from the schema):**
 ```jsonc
@@ -192,7 +192,7 @@ Every event includes `type`, `session_id`, and `schema_version` (currently `"1.2
 {
   "type": "session_error",
   "session_id": "demo",
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "code": "invalid_json",
   "message": "Invalid JSON at line 1, column 1: Expecting value",
   "request": "not json",
@@ -204,11 +204,26 @@ The connection stays open after request errors, so the client can correct and re
 `request` is the exact received text, including any audio supplied; unsupported binary
 frames are echoed as base64 with `request_encoding: "base64"`. These replies are sent
 only to the originating client and must never enter server logs or storage. Authentication
-failures still reject the handshake. Version 1.1 adds `session_error`; clients must use
-`schema_version: "1.2"` in all events. Pydantic types live in `server/app/events.py` and
+failures still reject the handshake. Version 1.3 adds ASR events; app, server and replay clients must use
+`schema_version: "1.3"` in all events. Pydantic types live in `server/app/events.py` and
 Swift types in `apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`, generated with
 `npx quicktype@23.2.6 -s schema schemas/events.schema.json --lang swift --top-level Events --access-level public
---density normal -o apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`.
+--density normal --sendable -o apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`.
+
+**Optional Mac ASR:** `/ws/asr?session_id=...` uses a separate WebSocket, keeping
+tone work independent. The phone sends an `asr_request` with its caption UUID,
+original segment bounds and 16 kHz mono PCM16 base64 audio. The server returns
+`asr_result` with matching identifiers/times, text, model version, processing
+duration and status (ok, busy, unavailable, error). ASR error responses never
+echo incoming audio. The phone only accepts a matching, nonempty successful
+result; otherwise it runs the same segment through locally prepared WhisperKit.
+
+Use the P4 build-configuration convention: an empty `ASR_URL` keeps captions
+on-device. Opting in with a development Mac base URL transmits completed speech
+segments. The client waits up to two seconds per attempt before local fallback;
+slow remote attempts can add delay. The Mac uses an optional Apple Silicon MLX
+backend with a preprovisioned checkpoint or an unavailable mock by default.
+It never stores request audio. See `server/README.md` for setup.
 
 Base64 JSON is fine for the MVP (~130 KB for a 3s segment). Binary frames are a later optimization.
 
@@ -235,8 +250,10 @@ For now the app has two ways to get landmarks, chosen by `LandmarkMode`. **`face
 | `fullFrame` | The whole frame, once. `VIDEO` mode (synchronous `LIVE_STREAM`, same cross-frame tracking), `numFaces = 4`; each mesh is attached to the Vision box containing its nose tip | Boxes only, no landmarks | One MediaPipe run per frame |
 
 - In both modes landmarks are returned in full-frame normalized coordinates, so FeatureBuilder and everything downstream are unaffected by the choice.
-- `outputFaceBlendshapes` and `outputFacialTransformationMatrixes` stay off until FeatureBuilder consumes them.
-- **Training must match the selected mode.** With `faceCrops` selected, `ml/asd` extraction must crop the same way (2.2×, 256 px) around the AVA face boxes instead of running on full frames (see §8). Until it does, train/test landmarks differ slightly. Features are nose-centered and divided by inter-ocular distance, so the expected drift is small, but it hasn't been measured. Head pose from the transformation matrix assumes the full camera view, so compute pose from full-frame landmarks (or crop identically in training) before enabling matrices.
+- `outputFaceBlendshapes` and `outputFacialTransformationMatrixes` are **on**. Each mesh's blendshapes and matrix ride along with its landmarks on `FaceMeasurement`/`FaceTrack` (`blendshapes`, `transform`) and are cleared with them when a face coasts.
+- **Training must match the selected mode.** With `faceCrops` selected, `ml/asd` extraction must crop the same way (2.2×, 256 px) around the AVA face boxes instead of running on full frames (see §8). Until it does, train/test landmarks differ slightly. Features are nose-centered and divided by inter-ocular distance, so the expected drift is small, but it hasn't been measured.
+- **Head pose with face crops: kept (96 features), checked on device 2026-11-05.** MediaPipe computes the matrix as if the crop were the whole camera view, so its translation/scale are in crop space and unused. The rotation is still meaningful: it is the head's pose relative to the line of sight to that face (rather than to the camera's optical axis), and since every crop is 2.2× the face, the face always fills the same share of MediaPipe's assumed view. This is consistent as long as training crops identically (§8), which it must anyway. On an iPhone with the debug readout below, yaw/pitch/roll followed head turns, nods and tilts as expected, so head pose stays. Still to do: the same-frame Python-vs-phone comparison (§8 MediaPipe parity check, needs the debug recorder) must include the 3 pose values. If that fails, drop head pose: 93 features, bump `FEATURE_SPEC_VERSION`, regenerate fixtures, and update this section. In `fullFrame` mode the rotation is relative to the camera axis instead, another reason training must match the mode. The front camera is mirrored, which flips the sign of yaw and roll (and mirrors the lips) compared with the back camera; training should augment with horizontal flips.
+- **Debug head-pose readout (off by default).** Shows `yaw … pitch … roll …` in degrees under each face box: the exact values the model gets (features 92–94, via `FeatureBuilder.headPose`). To turn it on, set `static let showsHeadPose = true` in `FaceBox` in `apps/ios/Graption/CameraView.swift` and run from Xcode; set it back to `false` before committing. It is inside `#if DEBUG`, so Release/TestFlight builds never include it regardless. To re-check pose (e.g. after a MediaPipe or crop change): facing the phone reads near 0°; turning left vs right changes yaw with opposite signs; nodding changes pitch, tilting changes roll; holding still flickers only a degree or two; sliding the face to the frame edge while still facing the phone barely changes the values.
 - **Switching modes:** edit one line in `CameraController` in `apps/ios/Graption/CameraView.swift`, `FaceCaptureEngine(landmarkMode: .faceCrops)` → `.fullFrame` (or back), rebuild, and update this section and the extraction to match.
 
 **FaceTracker** (`GraptionVision/FaceTracker.swift`, unit-tested with `swift test`)
@@ -247,16 +264,23 @@ For now the app has two ways to get landmarks, chosen by `LandmarkMode`. **`face
 **Speaker guess (until SpeakerModel ships)**
 - `LargestFaceScorer` implements the `SpeakerScorer` protocol: the largest face gets `p = 1`, the rest `0`. The camera view labels that face "talking" and draws it green. The Core ML model replaces it behind the same protocol.
 
-**FeatureBuilder**
-Must match `ml/common/features.py` exactly: same order, same normalization. It produces one vector per face per frame:
+**FeatureBuilder** (`GraptionVision/FeatureBuilder.swift`, spec version `features-v1`)
+Must match `ml/common/features.py` exactly: same order, same normalization. `FeatureBuilderTests` (`swift test`) reproduces every value in `ml/common/fixtures/features_v1.json`, which `ml/common/make_fixtures.py` generates from the Python code; `ml/common/tests/` fails if that file is stale. It produces one vector per face per frame, in this **locked order**:
 
-| Block | Size | Details |
-|---|---|---|
-| Lip landmarks | 80 | MediaPipe `FACEMESH_LIPS` indices (40 pts) × (x, y). Subtract the nose-tip landmark and divide by the inter-ocular distance |
-| Mouth blendshapes | 12 | `jawOpen, mouthClose, mouthFunnel, mouthPucker, mouthLowerDownLeft, mouthLowerDownRight, mouthUpperUpLeft, mouthUpperUpRight, mouthStretchLeft, mouthStretchRight, mouthRollLower, mouthRollUpper` |
-| Head pose | 3 | yaw, pitch, roll (radians) from the transformation matrix |
-| Loudness | 1 | RMS dBFS of mic audio over the frame's ~67 ms, minus the session's rolling 30s median |
-| **Total** | **96** | Plus a per-face ring buffer of the last 15 frames, giving model input `[1, 15, 96]` |
+| Index | Block | Size | Details |
+|---|---|---|---|
+| 0–79 | Lip landmarks | 80 | MediaPipe `FACEMESH_LIPS` indices (40 pts, sorted ascending) × (x, y), interleaved x0, y0, x1, y1, …. Converted to pixels (x·width, y·height, so aspect ratio doesn't matter), minus the nose tip (landmark 1), divided by the inter-ocular distance (iris centers 468 and 473, so the 478-point mesh is required) |
+| 80–91 | Mouth blendshapes | 12 | `jawOpen, mouthClose, mouthFunnel, mouthPucker, mouthLowerDownLeft, mouthLowerDownRight, mouthUpperUpLeft, mouthUpperUpRight, mouthStretchLeft, mouthStretchRight, mouthRollLower, mouthRollUpper`, looked up by category name |
+| 92–94 | Head pose | 3 | yaw, pitch, roll (radians) from the transformation matrix's rotation, R = Ry(yaw)·Rx(pitch)·Rz(roll): yaw = atan2(r02, r22), pitch = asin(−r12), roll = atan2(r10, r11), indices row-major |
+| 95 | Loudness | 1 | RMS dBFS of mic audio over the frame's ~67 ms, minus the session's rolling 30s median. Computed by the audio side and passed in (not yet implemented on either side) |
+| | **Total** | **96** | Plus a per-face ring buffer of the last 15 frames, giving model input `[1, 15, 96]` |
+
+Math is float64 on both sides; the phone hands Core ML float32. The vectors aren't computed in the live app yet (no SpeakerModel or loudness to consume them); `FeatureHistories.update(with:frameSize:loudness:)` is the per-frame entry point when they are.
+
+**Missing landmarks** (`FeatureHistory`, same rule in `features.py`; training uses it via `windows_from_track`)
+- A frame counts as *missing* when a tracked face has no landmarks (a coasting face or a MediaPipe miss), no blendshapes/matrix, or a mesh the builder rejects (fewer than 478 points, zero inter-ocular distance, a blendshape absent).
+- **Rule: repeat the last good frame, for at most 2 frames in a row.** A missing frame appends the last good frame's 95 face values with *this* frame's loudness. A 3rd consecutive miss, or a miss before any good frame, **starts that face's 15-frame history over**. 2 matches `FaceTracker.maxCoastFrames` (~133 ms at 15 fps): a blip doesn't cost a second of predictions, but stale lips are never fed for long.
+- A face that disappears from the published tracks (or, in training, a gap in the AVA track) loses its history too.
 
 **SpeakerModel**
 - Runs the Core ML model per face per frame, once that face's buffer has 15 frames.
@@ -438,8 +462,8 @@ for caption [t0, t1]:
 1. Resample the video to 15 fps and extract 16 kHz audio.
 2. Run MediaPipe with the same `.task` file as the app, in the **same `LandmarkMode` as the app** (§6). With `faceCrops` (currently selected): crop 2.2× around each AVA face box, resize to 256×256, run `IMAGE` mode, map landmarks back to full-frame coordinates. With `fullFrame`: **VIDEO** mode on full frames.
 3. Match each MediaPipe face to AVA boxes by IoU ≥ 0.5 and take that box's label. Drop unmatched faces.
-4. Compute the 96-dim features via `ml/common/features.py`.
-5. Build 15-frame windows (stride 1 for training).
+4. Compute the 96-dim features via `ml/common/features.py` (`face_features_or_none` per face per frame; order and rules in §6 FeatureBuilder).
+5. Build 15-frame windows (stride 1 for training) per AVA face track with `windows_from_track`, which applies the §6 missing-landmarks rule (hold the last good frame up to 2 frames, then restart). Frames where MediaPipe found no mesh in the crop are kept as missing, not dropped, so training sees the same windows the phone does.
 6. Save as sharded `.npz` files.
 
 **Model**
@@ -459,7 +483,7 @@ for caption [t0, t1]:
 2. **Parity test:** same inputs through PyTorch and Core ML, requiring `max |Δp| < 1e-3`.
 3. Name versions `asd-vN`.
 
-**MediaPipe parity check (do this early):** record a clip in debug mode, run the Python extractor on the same video, and compare the feature vectors. They must closely match before serious training.
+**MediaPipe parity check (do this early):** record a clip in debug mode, run the Python extractor on the same video, and compare the feature vectors, including the 3 head-pose values from crops (§6). They must closely match before serious training. (The arithmetic itself is already pinned by `ml/common/fixtures/`; this check is about MediaPipe's outputs on real frames.)
 
 ---
 
@@ -600,6 +624,7 @@ If the device is overloaded, degrade in this order:
 - **Committed `.xcodeproj`, not XcodeGen:** synchronized folders plus per-team Swift packages already avoid most merge conflicts, and it saves every teammate a tool install. Signing is per developer via a gitignored `Local.xcconfig`, because free Apple IDs can't share a bundle ID.
 - **Platform owns summaries and the dashboard:** there's no separate language team; it's non-blocking backend-style work that builds on the caption log Platform already moves around.
 - **OpenAI only as an offline benchmark:** the target is free on-device Apple Foundation Models, and an API key must never ship in the app.
+- **Feature order locked as lips → blendshapes → head pose → loudness (`features-v1`):** the doc had blendshapes before pose, the first `features.py` had pose first; the doc order won. Missing landmarks hold the last good frame up to 2 frames, then restart, so a one-frame MediaPipe miss doesn't cost a second of predictions. Head pose is kept with face crops because training crops identically, and an on-device check (2026-11-05) showed sensible yaw/pitch/roll; drop to 93 if the same-frame parity check disagrees.
 
 ---
 

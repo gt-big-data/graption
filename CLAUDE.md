@@ -7,7 +7,7 @@ doc, say so. Don't silently diverge. If a decision changes, update the doc in th
 
 ## Hard constraints
 - Captions, speaker highlighting, and sound alerts work **fully offline** on the iPhone.
-  Only tone tags may depend on a server.
+  Tone may depend on a server; optional Mac ASR must fall back to on-device WhisperKit.
 - **iOS only.** Minimal budget: everything must work without paid items (Apple dev account,
   OpenAI, cloud credits).
 - **Tone never blocks captions.** Captions render immediately; tone arrives later by `caption_id`.
@@ -23,7 +23,7 @@ doc, say so. Don't silently diverge. If a decision changes, update the doc in th
   with a stub/mock, so swapping models touches nothing else.
 - **Features are defined once** in `ml/common/features.py`; Swift mirrors it, tested against
   `ml/common/fixtures/`. Changing it invalidates trained models: flag it loudly.
-- **Events:** `schemas/events.schema.json` (v1.1) is the cross-team contract. Pydantic
+- **Events:** `schemas/events.schema.json` (v1.3) is the cross-team contract. Pydantic
   (`datamodel-code-generator`) and Swift (`quicktype`) types are generated from it, never
   hand-edited. Schema change → bump `schema_version`, regenerate, update `schemas/tests/`.
 - All timestamps: seconds since session start on the **phone's** monotonic clock.

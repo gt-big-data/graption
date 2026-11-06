@@ -19,6 +19,10 @@ struct ContentView: View {
     @State private var hasPrintedLabels = false
     @State private var isVisible = false
     @State private var pipeline = CaptionPipeline()
+    @State private var localTranscriber = WhisperKitTranscriber()
+    @State private var asrClient: ASRClient?
+    @State private var pendingCaptions = 0
+    @State private var flushingCapture = false
     @State private var isRecording = false
     @State private var isCalibrating = false
     @State private var calibrationCount: Int?
@@ -33,6 +37,7 @@ struct ContentView: View {
 
     private var canListen: Bool {
         capture != nil && isReady && !isPreparing && !isCalibrating && !isStarting
+            && (isRecording || (pendingCaptions == 0 && !flushingCapture))
     }
 
     /// Newest three captions, oldest on the left, matching the three-bubble layout.
@@ -135,6 +140,7 @@ struct ContentView: View {
             do {
                 // Reuse one capture so calibration survives Stop/Start.
                 if capture == nil {
+                    pipeline = CaptionPipeline(transcriber: localTranscriber)
                     capture = MicrophoneCapture(
                         vad: EnergyVAD(threshold: 0.001),
                         soundDetector: try AppleSoundDetector()
@@ -156,6 +162,8 @@ struct ContentView: View {
             capture?.stop()
             soundAlertModel.clear()
             pipeline.reset()
+            closeASRConnection()
+            pendingCaptions = 0
             isRecording = false
             isCalibrating = false
             calibrationCount = nil
@@ -169,7 +177,11 @@ struct ContentView: View {
             guard isRecording, !isCalibrating, isVisible else { return }
             soundAlertModel.show(alert)
         }
-        capture.onSegment = { segment in pipeline.enqueue(segment) }
+        capture.onSegment = { segment in
+            guard isVisible else { return }
+            pendingCaptions += 1
+            pipeline.enqueue(segment)
+        }
         capture.onError = { error in
             if isCalibrating {
                 capture.stop()
@@ -178,10 +190,16 @@ struct ContentView: View {
             report(error)
         }
         pipeline.onError = { id, error in
+            captionFinished()
             report(error, captionID: id)
         }
         pipeline.onResult = { delivery in
+            captionFinished()
             let caption = delivery.result
+            if isRecording, asrClient != nil {
+                status = caption.asrModelVersion.hasPrefix("mlx-whisper-")
+                    ? "Listening — Mac captions" : "Listening — iPhone captions"
+            }
             // Retained for later queue/UI diagnostics: measures enqueue-to-callback
             // time, including queue wait and ASR, but not the actual visible frame.
             // let delay = CaptionPipeline.seconds(delivery.receivedAt.duration(to: .now))
@@ -240,7 +258,7 @@ struct ContentView: View {
     /// 3 seconds leaves room for the microphone to start.
     private func listen() async {
         guard let capture else { return }
-        guard !isRecording, !isCalibrating, !isStarting else { return }
+        guard canListen, !isRecording else { return }
         isStarting = true
         defer { isStarting = false }
         guard await capture.requestPermission() else {
@@ -281,6 +299,20 @@ struct ContentView: View {
         }
         guard !Task.isCancelled, isVisible else { return }
         do {
+            closeASRConnection()
+            var transcriber: any CaptionTranscriber = localTranscriber
+            if let configuration = ASRClientConfiguration.fromAppConfiguration() {
+                let client = ASRClient(configuration: configuration)
+                asrClient = client
+                transcriber = FallbackCaptionTranscriber(
+                    remote: MacCaptionTranscriber(client: client), local: localTranscriber
+                )
+            }
+            pipeline = CaptionPipeline(transcriber: transcriber)
+            configureCallbacks()
+            try await pipeline.prepare(allowDownload: false)
+            try Task.checkCancellation()
+            guard isVisible else { return }
             try capture.start()
             isRecording = true
             status = "Listening"
@@ -296,9 +328,26 @@ struct ContentView: View {
         isRecording = false
         listenTask?.cancel()
         listenTask = nil
+        flushingCapture = true
         capture?.stop()
+        // Stop enqueues any flushed segment on the main queue before this block.
+        DispatchQueue.main.async {
+            flushingCapture = false
+            if pendingCaptions == 0 { closeASRConnection() }
+        }
         soundAlertModel.clear()
         status = wasCalibrating ? "Ready" : "Stopped; finishing pending captions"
+    }
+
+    private func captionFinished() {
+        pendingCaptions = max(0, pendingCaptions - 1)
+        if !isRecording, !flushingCapture, pendingCaptions == 0 { closeASRConnection() }
+    }
+
+    private func closeASRConnection() {
+        guard let client = asrClient else { return }
+        asrClient = nil
+        Task { await client.disconnect() }
     }
 
     private func printKnownLabelsOnce() {
@@ -356,4 +405,19 @@ private struct CaptionEntry: Identifiable {
     let text: String
     let transcriptionSeconds: TimeInterval
     var id: UUID { result.captionID }
+}
+
+
+/// Bridges the network package to the audio package without coupling their APIs.
+private struct MacCaptionTranscriber: CaptionTranscriber {
+    let client: ASRClient
+
+    func prepare(allowDownload: Bool) async throws {}
+
+    func transcribe(_ segment: AudioSegment) async throws -> TranscriptionResult {
+        let reply = try await client.transcribe(captionID: segment.captionID,
+            tStart: segment.tStart, tEnd: segment.tEnd, samples: segment.samples)
+        return TranscriptionResult(captionID: segment.captionID, text: reply.text,
+            tStart: segment.tStart, tEnd: segment.tEnd, asrModelVersion: reply.modelVersion)
+    }
 }

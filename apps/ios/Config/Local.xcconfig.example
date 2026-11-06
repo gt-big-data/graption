@@ -12,3 +12,7 @@ DEV_SUFFIX = yourname
 // Example local URL: ws:/$()/192.168.1.8:8000
 TONE_URL =
 TONE_TOKEN =
+
+// Optional Mac transcription. Use a trusted LAN; configure a base URL without /ws/asr.
+// ASR_URL = ws:/$()/192.168.1.10:8000
+// ASR_TOKEN =
