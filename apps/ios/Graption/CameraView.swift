@@ -825,6 +825,11 @@ struct CameraView: View {
 /// The outline uses the active caption's speaker color. The label still shows the track id.
 private struct FaceBox: View {
     #if DEBUG
+    /// Head-pose readout under each face box (yaw/pitch/roll in degrees, the same values as
+    /// features 92-94). Set to `true` to check head pose on a phone (GRAPTION_CONTEXT.md §6).
+    /// Debug builds only: Release/TestFlight never include it, whatever this is set to.
+    static let showsHeadPose = false
+
     static func headPoseText(_ transform: simd_float4x4?) -> String {
         guard let transform else { return "no pose" }
         let degrees = FeatureBuilder.headPose(transform).map { Int(($0 * 180 / .pi).rounded()) }
@@ -865,16 +870,17 @@ private struct FaceBox: View {
                     .offset(y: -18)
             }
             #if DEBUG
-            // Head-pose check (GRAPTION_CONTEXT.md §6): the same yaw/pitch/roll the speaker
-            // model gets (features 92-94), in degrees. Debug builds only; Release omits it.
+            // Head-pose check (GRAPTION_CONTEXT.md §6), toggled by `FaceBox.showsHeadPose`.
             .overlay(alignment: .bottomLeading) {
-                Text(Self.headPoseText(transform))
-                    .font(.caption.monospacedDigit().weight(.bold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 4)
-                    .background(color)
-                    .fixedSize()
-                    .offset(y: 18)
+                if Self.showsHeadPose {
+                    Text(Self.headPoseText(transform))
+                        .font(.caption.monospacedDigit().weight(.bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 4)
+                        .background(color)
+                        .fixedSize()
+                        .offset(y: 18)
+                }
             }
             #endif
             .position(
