@@ -5,6 +5,9 @@ import GraptionUI
 
 @MainActor
 struct ContentView: View {
+    @State private var showHomeScreen = true
+    @State private var showTranscript = false
+    @State private var showSettings = false
     @State private var showSavedSessions = false
     @State private var capture: MicrophoneCapture?
     @StateObject private var toneMonitor = ToneConnectionMonitor(
@@ -51,7 +54,45 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if isReady {
+            if showSettings {
+                SettingsScreen(
+                    cameraPreviewDestination: { AnyView(CameraView(captions: bubbleCaptions)) },
+                    onBack: {
+                        showSettings = false
+                        showHomeScreen = true
+                    }
+                )
+            } else if showTranscript {
+                TranscriptScreen(
+                    captions: captions.map { entry in
+                        TranscriptCaption(
+                            id: entry.id,
+                            speaker: "Someone",
+                            text: entry.text,
+                            tone: nil
+                        )
+                    },
+                    onHome: {
+                        showTranscript = false
+                        showHomeScreen = true
+                    }
+                )
+            } else if showHomeScreen {
+                HomeScreen(
+                    serverStatus: toneMonitor.state.label,
+                    onOpenLiveCaptions: {
+                        showHomeScreen = false
+                    },
+                    onOpenSettings: {
+                        showSettings = true
+                        showHomeScreen = false
+                    },
+                    onOpenTranscript: {
+                        showTranscript = true
+                        showHomeScreen = false
+                    }
+                )
+            } else if isReady {
                 LiveCaptionScreen(
                     cameraPreviewDestination: { AnyView(CameraView(captions: bubbleCaptions)) },
                     captions: bubbleCaptions,
@@ -67,7 +108,13 @@ struct ContentView: View {
                         }
                     },
                     calibrationCount: calibrationCount,
-                    isSettingUp: isPreparing
+                    isSettingUp: isPreparing,
+                    onHome: {
+                        // Leaving live captions turns the microphone off; the
+                        // screen-level .onDisappear doesn't fire for in-place swaps.
+                        if isRecording || isCalibrating { stopListening() }
+                        showHomeScreen = true
+                    }
                 )
             } else {
                 InstallBaseEnPage(isInstalling: isPreparing, detail: setupFailed ? status : nil) {
