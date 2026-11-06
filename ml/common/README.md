@@ -1,23 +1,40 @@
 # ml/common: shared feature spec (Vision team)
 
-`ml/common/features.py` (to be written) is the **one** definition of the per-face, per-frame
-feature vector. The iOS FeatureBuilder must match it exactly: same order, same normalization.
-Spec: `docs/GRAPTION_CONTEXT.md` §6 (FeatureBuilder) and §8.
+`ml/common/features.py` is the **one** definition of the per-face, per-frame feature vector
+(`features-v1`). The iOS mirror is `apps/ios/Packages/GraptionVision/Sources/GraptionVision/FeatureBuilder.swift`.
+Spec: `docs/GRAPTION_CONTEXT.md` §6 (FeatureBuilder, Missing landmarks) and §8.
 
-| Block | Size | Notes |
-|---|---|---|
-| Lip landmarks | 80 | 40 pts × (x, y), minus nose tip, ÷ inter-ocular distance |
-| Mouth blendshapes | 12 | `jawOpen, mouthClose, mouthFunnel, mouthPucker, mouthLowerDownLeft, mouthLowerDownRight, mouthUpperUpLeft, mouthUpperUpRight, mouthStretchLeft, mouthStretchRight, mouthRollLower, mouthRollUpper` |
-| Head pose | 3 | yaw, pitch, roll (radians) |
-| Loudness | 1 | frame RMS dBFS minus rolling 30 s median |
-| **Total** | **96** | model input `[1, 15, 96]` (15 frames at 15 fps) |
+| Index | Block | Size | Notes |
+|---|---|---|---|
+| 0–79 | Lip landmarks | 80 | 40 `FACEMESH_LIPS` pts (sorted) × (x, y), pixels, minus nose tip (1), ÷ inter-ocular distance (irises 468, 473) |
+| 80–91 | Mouth blendshapes | 12 | `jawOpen, mouthClose, mouthFunnel, mouthPucker, mouthLowerDownLeft, mouthLowerDownRight, mouthUpperUpLeft, mouthUpperUpRight, mouthStretchLeft, mouthStretchRight, mouthRollLower, mouthRollUpper` |
+| 92–94 | Head pose | 3 | yaw, pitch, roll (radians), R = Ry·Rx·Rz from the transformation matrix |
+| 95 | Loudness | 1 | frame RMS dBFS minus rolling 30 s median (passed in) |
+| | **Total** | **96** | model input `[1, 15, 96]` (15 frames at 15 fps) |
 
-Reference data:
-- The 40 unique points of MediaPipe's `FACEMESH_LIPS` (checked against mediapipe 1.0.1), sorted:
-  `0, 13, 14, 17, 37, 39, 40, 61, 78, 80, 81, 82, 84, 87, 88, 91, 95, 146, 178, 181, 185, 191,
-  267, 269, 270, 291, 308, 310, 311, 312, 314, 317, 318, 321, 324, 375, 402, 405, 409, 415`.
-  Pick an order and lock it; Swift uses the same.
-- **Undecided:** which landmarks are the nose tip and the eyes (for inter-ocular distance). The doc
-  doesn't say. Decide before extracting any training data.
+Missing landmarks: `FeatureHistory` / `windows_from_track` repeat the last good frame (with
+current loudness) for up to 2 frames, then restart the face's history.
 
-Parity: Python writes small fixtures to `ml/common/fixtures/`; a Swift unit test must reproduce them.
+## Parity fixtures
+
+```bash
+uv run python ml/common/make_fixtures.py   # rewrites fixtures/features_v1.json
+uv run pytest ml/common                    # fails if the fixtures are stale
+swift test --package-path apps/ios/Packages/GraptionVision   # Swift must reproduce them
+```
+
+## See it on a real face
+
+`fixtures/real_faces_v1.json` is real MediaPipe output (the app's `face_landmarker.task`, the
+app's 2.2x/256 px face crops) on the repo's placeholder photo, plus Python's 96 numbers.
+
+```bash
+# Python vs iPhone, all 96 numbers per face, labeled
+GRAPTION_SHOW_FEATURES=1 swift test --package-path apps/ios/Packages/GraptionVision --filter RealFaceFeatureTests
+
+# Re-capture (or try another photo with --image); also writes a PNG of the points used
+uv run --no-project --python 3.12 --with mediapipe python ml/common/capture_faces.py --overlay /tmp/overlay.png
+```
+
+Changing anything in `features.py` invalidates trained models: bump `FEATURE_SPEC_VERSION`
+(both sides), regenerate the fixtures, update the Swift code and §6, and tag the Vision lead.
