@@ -47,7 +47,7 @@ def replay(args: argparse.Namespace) -> None:
                 request = {
                     "type": "tone_request",
                     "session_id": args.session_id,
-                    "schema_version": "1.2",
+                    "schema_version": "1.3",
                     "caption_id": caption_id,
                     # Emulate phone session time using the WAV's sample timeline.
                     "t_start": frame_offset / sample_rate,

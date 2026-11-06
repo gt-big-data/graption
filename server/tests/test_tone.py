@@ -59,7 +59,7 @@ def tone_request(audio: bytes = b"\0\0" * 16000) -> dict:
     return {
         "type": "tone_request",
         "session_id": "test-session",
-        "schema_version": "1.2",
+        "schema_version": "1.3",
         "caption_id": str(uuid4()),
         "t_start": 0.0,
         "t_end": len(audio) / 2 / 16000,

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -11,8 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 from typing_extensions import TypeAliasType
 
 
-class SchemaVersion(RootModel[Literal["1.2"]]):
-    root: Literal["1.2"]
+class SchemaVersion(RootModel[Literal["1.3"]]):
+    root: Literal["1.3"]
 
 
 class RequestEncoding(Enum):
@@ -152,6 +152,15 @@ class Probs(BaseModel):
     sad: Probability
 
 
+class Scores(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    arousal: float
+    valence: float
+    dominance: float
+
+
 LatencyMsAdditionalProperty = TypeAliasType(
     "LatencyMsAdditionalProperty", Annotated[float, Field(ge=0.0)]
 )
@@ -176,9 +185,70 @@ class ToneResult(BaseModel):
     schema_version: SchemaVersion
     caption_id: CaptionId
     tag: Annotated[str | None, Field(examples=["happy"])]
-    probs: Probs
+    probs: Probs | None = None
+    scores: Scores | None = None
     model_version: Annotated[str, Field(examples=["tone-head-v2"])]
     latency_ms: LatencyMs
+
+
+class ASRRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    type: Literal["asr_request"]
+    session_id: SessionId
+    schema_version: SchemaVersion
+    caption_id: CaptionId
+    t_start: Seconds
+    t_end: Seconds
+    sample_rate: Annotated[int, Field(ge=16000, le=16000)]
+    audio_b64: Annotated[
+        str,
+        Field(
+            description="PCM16 mono little-endian; never stored or logged.",
+            json_schema_extra={"contentEncoding": "base64"},
+            max_length=426668,
+            min_length=4,
+        ),
+    ]
+
+
+class Status(StrEnum):
+    ok = "ok"
+    unavailable = "unavailable"
+    busy = "busy"
+    error = "error"
+
+
+LatencyMs1AdditionalProperty = TypeAliasType(
+    "LatencyMs1AdditionalProperty", Annotated[float, Field(ge=0.0)]
+)
+
+
+class LatencyMs1(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
+    __annotations__ = {
+        "__pydantic_extra__": dict[str, LatencyMs1AdditionalProperty],
+    }
+    recv_to_send: Annotated[float, Field(ge=0.0)]
+
+
+class ASRResult(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    type: Literal["asr_result"]
+    session_id: SessionId
+    schema_version: SchemaVersion
+    caption_id: CaptionId
+    t_start: Seconds
+    t_end: Seconds
+    status: Status
+    text: Annotated[str, Field(max_length=16000)]
+    model_version: Annotated[str, Field(min_length=1)]
+    latency_ms: LatencyMs1
 
 
 class SessionError(BaseModel):
@@ -202,13 +272,29 @@ class SessionError(BaseModel):
 
 class GraptionEvent(
     RootModel[
-        SpeakerScores | Caption | SoundEvent | ToneRequest | CaptionLog | ToneResult | SessionError
+        SpeakerScores
+        | Caption
+        | SoundEvent
+        | ToneRequest
+        | CaptionLog
+        | ToneResult
+        | SessionError
+        | ASRRequest
+        | ASRResult
     ]
 ):
     root: Annotated[
-        SpeakerScores | Caption | SoundEvent | ToneRequest | CaptionLog | ToneResult | SessionError,
+        SpeakerScores
+        | Caption
+        | SoundEvent
+        | ToneRequest
+        | CaptionLog
+        | ToneResult
+        | SessionError
+        | ASRRequest
+        | ASRResult,
         Field(
-            description="Graption event contract v1.2 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds since session start on the phone's monotonic host clock. Changing this file = bump schema_version and regenerate Pydantic + Swift types.",
+            description="Graption event contract v1.3 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds since session start on the phone's monotonic host clock. Changing this file = bump schema_version and regenerate Pydantic + Swift types.",
             title="GraptionEvent",
         ),
     ]

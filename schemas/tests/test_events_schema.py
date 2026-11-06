@@ -11,7 +11,7 @@ SCHEMA_PATH = Path(__file__).resolve().parents[1] / "events.schema.json"
 SCHEMA = json.loads(SCHEMA_PATH.read_text())
 VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
 
-BASE = {"session_id": "s-test", "schema_version": "1.2"}
+BASE = {"session_id": "s-test", "schema_version": "1.3"}
 CAPTION_ID = "3f1c2a9e-8b7d-4c6e-9a01-2b3c4d5e6f70"
 
 CAPTION = {
@@ -142,3 +142,41 @@ def _broken(name, mutate):
 )
 def test_invalid_events_are_rejected(event):
     assert not VALIDATOR.is_valid(event)
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {
+            **BASE,
+            "type": "asr_request",
+            "caption_id": CAPTION_ID,
+            "t_start": 0,
+            "t_end": 0.1,
+            "sample_rate": 16000,
+            "audio_b64": "AAABAAIA",
+        },
+        {
+            **BASE,
+            "type": "asr_result",
+            "caption_id": CAPTION_ID,
+            "t_start": 0,
+            "t_end": 0.1,
+            "status": "ok",
+            "text": "Hello",
+            "model_version": "test-asr-v1",
+            "latency_ms": {"recv_to_send": 10},
+        },
+    ],
+)
+def test_asr_examples(event):
+    VALIDATOR.validate(event)
+    broken = {**event, "schema_version": "1.2"}
+    assert not VALIDATOR.is_valid(broken)
+    broken = {**event, "caption_id": "invalid"}
+    assert not VALIDATOR.is_valid(broken)
+    if event["type"] == "asr_request":
+        assert not VALIDATOR.is_valid({**event, "sample_rate": 48000})
+        assert not VALIDATOR.is_valid({**event, "audio_b64": "x" * 426669})
+    else:
+        assert not VALIDATOR.is_valid({**event, "status": "partial"})

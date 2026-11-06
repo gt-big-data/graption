@@ -20,7 +20,7 @@ Example output:
 - **iOS only.** No Android.
 - **Training compute:** the team's M-series Macs (PyTorch on `mps`). Training is never part of the live app.
 - **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi (tone model only).
-- **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network. Only tone tags may depend on a server (Mac or cloud).
+- **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network. Tone may depend on a server; optional Mac ASR must fall back to on-device WhisperKit.
 - **User testing:** DHH testers use the app on their own phones at home via TestFlight. Their phones can't reach the dev Mac, which is why the tone server must also run in the cloud (or behind a tunnel).
 
 ### Non-goals (semester one)
@@ -153,7 +153,7 @@ The repo starts with only READMEs in most folders; each team creates the files a
 All timestamps are **seconds since session start, measured on the phone's monotonic host clock**. Convert camera and audio `CMSampleBuffer` presentation timestamps to host time. The Mac never generates timestamps used for alignment.
 
 ### Event schema (`schemas/events.schema.json`)
-Every event includes `type`, `session_id`, and `schema_version` (currently `"1.2"`).
+Every event includes `type`, `session_id`, and `schema_version` (currently `"1.3"`).
 
 **On-device (Swift types, generated from the schema):**
 ```jsonc
@@ -192,7 +192,7 @@ Every event includes `type`, `session_id`, and `schema_version` (currently `"1.2
 {
   "type": "session_error",
   "session_id": "demo",
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "code": "invalid_json",
   "message": "Invalid JSON at line 1, column 1: Expecting value",
   "request": "not json",
@@ -204,11 +204,26 @@ The connection stays open after request errors, so the client can correct and re
 `request` is the exact received text, including any audio supplied; unsupported binary
 frames are echoed as base64 with `request_encoding: "base64"`. These replies are sent
 only to the originating client and must never enter server logs or storage. Authentication
-failures still reject the handshake. Version 1.1 adds `session_error`; clients must use
-`schema_version: "1.2"` in all events. Pydantic types live in `server/app/events.py` and
+failures still reject the handshake. Version 1.3 adds ASR events; app, server and replay clients must use
+`schema_version: "1.3"` in all events. Pydantic types live in `server/app/events.py` and
 Swift types in `apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`, generated with
 `npx quicktype@23.2.6 -s schema schemas/events.schema.json --lang swift --top-level Events --access-level public
---density normal -o apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`.
+--density normal --sendable -o apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`.
+
+**Optional Mac ASR:** `/ws/asr?session_id=...` uses a separate WebSocket, keeping
+tone work independent. The phone sends an `asr_request` with its caption UUID,
+original segment bounds and 16 kHz mono PCM16 base64 audio. The server returns
+`asr_result` with matching identifiers/times, text, model version, processing
+duration and status (ok, busy, unavailable, error). ASR error responses never
+echo incoming audio. The phone only accepts a matching, nonempty successful
+result; otherwise it runs the same segment through locally prepared WhisperKit.
+
+Use the P4 build-configuration convention: an empty `ASR_URL` keeps captions
+on-device. Opting in with a development Mac base URL transmits completed speech
+segments. The client waits up to two seconds per attempt before local fallback;
+slow remote attempts can add delay. The Mac uses an optional Apple Silicon MLX
+backend with a preprovisioned checkpoint or an unavailable mock by default.
+It never stores request audio. See `server/README.md` for setup.
 
 Base64 JSON is fine for the MVP (~130 KB for a 3s segment). Binary frames are a later optimization.
 

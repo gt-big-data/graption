@@ -159,3 +159,21 @@ Tests cover persistence through a new store instance, every caption field, the c
 JSON field allowlist, absent tone, late tone, duplicate/repeated saves, empty sessions,
 sort order, invalid timings, failed-save retry, and corrupted JSON. They use temporary
 folders and synthetic text; they never capture audio.
+
+
+### Optional Mac captions (A8)
+
+Follow the [server setup](../../server/README.md#optional-mac-transcription).
+As with P4, edit the gitignored `Config/Local.xcconfig` and rebuild:
+
+```xcconfig
+ASR_URL = ws:/$()/192.168.1.10:8000
+// ASR_TOKEN = matching-local-development-token
+```
+
+Use the Mac's LAN address, with no `/ws/asr` suffix; the client appends it.
+This setting opts into sending completed speech segments to your Mac. Keep it
+empty for iPhone-only captions. Use a trusted network, allow Local Network access,
+and provision WhisperKit base.en. Speak and pause; confirm “Mac captions.”
+Stop the Mac server and speak again; confirm “iPhone captions.” Tone configuration
+is independent. Keep development tokens out of committed configuration.

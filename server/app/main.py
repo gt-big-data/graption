@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
+from app.asr import create_asr_backend
+from app.asr_ws import router as asr_router
 from app.observability import close_logging, configure_logging, record
 from app.tone import create_backend
 from app.ws import router
@@ -32,7 +34,9 @@ def create_app(*, verbose: bool = False) -> FastAPI:
     app.state.verbose = verbose
     # TONE_BACKEND picks the model (default mock); see app/tone.py.
     app.state.tone_backend = create_backend()
+    app.state.asr_backend = create_asr_backend()
     app.include_router(router)
+    app.include_router(asr_router)
     app.add_api_route("/health", health, response_class=PlainTextResponse)
     return app
 
