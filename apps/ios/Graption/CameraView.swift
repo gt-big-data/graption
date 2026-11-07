@@ -713,6 +713,8 @@ private struct CameraPreview: UIViewRepresentable {
 struct CameraView: View {
     @StateObject private var controller = CameraController()
     @Environment(\.dismiss) private var dismiss
+    /// False when embedded in the live caption screen, which supplies its own menu.
+    @Environment(\.isPresented) private var isPresented
     var captions: [LiveCaption] = []
 
     var body: some View {
@@ -742,16 +744,6 @@ struct CameraView: View {
                                     color: speakerBoxColor()
                                 )
                             }
-
-                            Text("Faces: \(controller.faces.count)")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(.black.opacity(0.6), in: Capsule())
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                                .padding(.top, 16)
-                                .padding(.trailing, 16)
                         }
                     }
                     .ignoresSafeArea()
@@ -772,18 +764,22 @@ struct CameraView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.backward")
-                    .font(.system(size: 20, weight: .bold))
-                    .frame(width: 30, height: 36)
+            if isPresented {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.backward")
+                        .font(.system(size: 20, weight: .bold))
+                        .frame(width: 30, height: 36)
+                }
+                .padding(.top, 12)
+                .padding(.leading, 16)
+                .tint(.white)
             }
-            .padding(.top, 12)
-            .padding(.leading, 16)
-            .tint(.white)
         }
-        .overlay(alignment: .bottomTrailing) {
+        // Embedded, the bottom belongs to captions, so the flip button stacks under the
+        // controls menu (56 pt, 16 pt from the top-right corner).
+        .overlay(alignment: isPresented ? .bottomTrailing : .topTrailing) {
             if controller.status == .running {
                 Button(action: controller.flipCamera) {
                     Image(systemName: "arrow.triangle.2.circlepath.camera")
@@ -792,8 +788,8 @@ struct CameraView: View {
                         .frame(width: 52, height: 52)
                         .background(.black.opacity(0.45), in: Circle())
                 }
-                .padding(.trailing, 16)
-                .padding(.bottom, 16)
+                .padding(isPresented ? .bottom : .top, isPresented ? 16 : 84)
+                .padding(.trailing, isPresented ? 16 : 18)
                 .accessibilityLabel(controller.cameraPosition == .back ? "Use selfie camera" : "Use back camera")
             }
         }

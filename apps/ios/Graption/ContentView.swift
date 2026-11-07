@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var showTranscript = false
     @State private var showSettings = false
     @State private var showSavedSessions = false
+    @State private var transcriptReturnsToLive = false
     @State private var capture: MicrophoneCapture?
     @StateObject private var toneMonitor = ToneConnectionMonitor(
         configuration: ToneClientConfiguration.fromAppConfiguration(
@@ -33,6 +34,8 @@ struct ContentView: View {
     @State private var status = "Loading base.en…"
     @State private var setupFailed = false
     @State private var captions: [CaptionEntry] = []
+    /// Captions whose on-screen time is up. They leave the camera view but stay in the transcript.
+    @State private var expiredCaptionIDs: Set<UUID> = []
     @State private var listenTask: Task<Void, Never>?
 
     private var canListen: Bool {
@@ -40,10 +43,28 @@ struct ContentView: View {
             && (isRecording || (pendingCaptions == 0 && !flushingCapture))
     }
 
-    /// Newest three captions, oldest on the left, matching the three-bubble layout.
+    /// At most three unexpired captions, oldest first, matching the three-bubble layout.
     private var bubbleCaptions: [LiveCaption] {
-        captions.prefix(3).reversed().map { entry in
-            LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text)
+        Array(captions.filter { !expiredCaptionIDs.contains($0.id) }.prefix(3))
+            .reversed()
+            .map { entry in
+                LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text)
+            }
+    }
+
+    /// How long a caption stays over the camera: reading time at 2.5 words per second
+    /// (150 wpm, the adult rate in DCMP captioning guidance), held for 4 to 8 seconds.
+    static func onScreenSeconds(for text: String) -> Double {
+        let words = text.split(whereSeparator: \.isWhitespace).count
+        return min(8, max(4, Double(words) / 2.5))
+    }
+
+    private func scheduleExpiry(of entry: CaptionEntry) {
+        let id = entry.id
+        let seconds = Self.onScreenSeconds(for: entry.text)
+        Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            expiredCaptionIDs.insert(id)
         }
     }
 
@@ -74,7 +95,7 @@ struct ContentView: View {
                     },
                     onHome: {
                         showTranscript = false
-                        showHomeScreen = true
+                        showHomeScreen = !transcriptReturnsToLive
                     }
                 )
             } else if showHomeScreen {
@@ -88,8 +109,12 @@ struct ContentView: View {
                         showHomeScreen = false
                     },
                     onOpenTranscript: {
+                        transcriptReturnsToLive = false
                         showTranscript = true
                         showHomeScreen = false
+                    },
+                    onOpenSavedSessions: {
+                        showSavedSessions = true
                     }
                 )
             } else if isReady {
@@ -114,6 +139,10 @@ struct ContentView: View {
                         // screen-level .onDisappear doesn't fire for in-place swaps.
                         if isRecording || isCalibrating { stopListening() }
                         showHomeScreen = true
+                    },
+                    onTranscript: {
+                        transcriptReturnsToLive = true
+                        showTranscript = true
                     }
                 )
             } else {
@@ -121,15 +150,6 @@ struct ContentView: View {
                     Task { await prepareModel(allowDownload: true) }
                 }
             }
-        }
-        .overlay(alignment: .topTrailing) {
-            Button {
-                showSavedSessions = true
-            } label: {
-                Label("Saved sessions", systemImage: "clock.arrow.circlepath")
-            }
-            .buttonStyle(.borderedProminent)
-            .padding()
         }
         .sheet(isPresented: $showSavedSessions) {
             SavedSessionsView()
@@ -229,11 +249,13 @@ struct ContentView: View {
             let isShortEmpty = caption.tEnd - caption.tStart < 1 && displayText.isEmpty
             guard !isBlankAudio, !isShortEmpty else { return }
             // Stable caption IDs keep cards distinct when newer results arrive.
-            captions.insert(CaptionEntry(
+            let entry = CaptionEntry(
                 result: caption,
                 text: displayText.isEmpty ? "[No speech recognized]" : displayText,
                 transcriptionSeconds: delivery.transcriptionSeconds
-            ), at: 0)
+            )
+            captions.insert(entry, at: 0)
+            scheduleExpiry(of: entry)
         }
     }
 
@@ -273,6 +295,7 @@ struct ContentView: View {
         pipeline.reset()
         soundAlertModel.clear()
         captions.removeAll()
+        expiredCaptionIDs.removeAll()
         do {
             try capture.start(calibrating: true)
         } catch {

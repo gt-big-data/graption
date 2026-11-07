@@ -7,6 +7,7 @@ struct HomeScreen: View {
     var onOpenLiveCaptions: () -> Void = {}
     var onOpenSettings: () -> Void = {}
     var onOpenTranscript: () -> Void = {}
+    var onOpenSavedSessions: () -> Void = {}
 
     var body: some View {
         ZStack {
@@ -123,6 +124,16 @@ struct HomeScreen: View {
                                 }
                                 .buttonStyle(PlainButtonStyle())
 
+                                Button(action: onOpenSavedSessions) {
+                                    DestinationCard(
+                                        icon: Image(systemName: "clock.arrow.circlepath"),
+                                        title: "Saved sessions",
+                                        description: "Review captions from past conversations.",
+                                        hasArrow: true
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+
                                 Button(action: onOpenSettings) {
                                     DestinationCard(
                                         icon: Image("preferences", bundle: nil),
@@ -180,6 +191,7 @@ struct DestinationCard: View {
                         .cornerRadius(12)
 
                     icon
+                        .foregroundStyle(Color.graptionAccent)
                         .frame(width: 22, height: 22)
                 }
 
