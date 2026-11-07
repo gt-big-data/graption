@@ -277,6 +277,29 @@ Must match `ml/common/features.py` exactly: same order, same normalization. `Fea
 
 Math is float64 on both sides; the phone hands Core ML float32. The vectors aren't computed in the live app yet (no SpeakerModel or loudness to consume them); `FeatureHistories.update(with:frameSize:loudness:)` is the per-frame entry point when they are.
 
+**Feature position map (`features-v1`).** Every position of the 96, so the vector can be read or rebuilt without the code. Generated from `ml/common/features.py` (`LIP_LANDMARKS`, `BLENDSHAPE_NAMES`, `feature_labels()`); `FeatureSpec.labels` in Swift is tested against it.
+
+- **Reference landmarks:** nose tip = **1** (origin for all lip points); eyes = **468** and **473** (iris centers; their distance is the scale). Needs the 478-point mesh.
+- **Lips, positions 0–79:** the 40 points of `FACEMESH_LIPS`, sorted ascending. Point *k* fills positions 2*k* (x) and 2*k*+1 (y).
+
+| Positions (x, y) | Landmark | Positions (x, y) | Landmark | Positions (x, y) | Landmark | Positions (x, y) | Landmark |
+|---|---|---|---|---|---|---|---|
+| 0, 1 | 0 | 20, 21 | 81 | 40, 41 | 185 | 60, 61 | 314 |
+| 2, 3 | 13 | 22, 23 | 82 | 42, 43 | 191 | 62, 63 | 317 |
+| 4, 5 | 14 | 24, 25 | 84 | 44, 45 | 267 | 64, 65 | 318 |
+| 6, 7 | 17 | 26, 27 | 87 | 46, 47 | 269 | 66, 67 | 321 |
+| 8, 9 | 37 | 28, 29 | 88 | 48, 49 | 270 | 68, 69 | 324 |
+| 10, 11 | 39 | 30, 31 | 91 | 50, 51 | 291 | 70, 71 | 375 |
+| 12, 13 | 40 | 32, 33 | 95 | 52, 53 | 308 | 72, 73 | 402 |
+| 14, 15 | 61 | 34, 35 | 146 | 54, 55 | 310 | 74, 75 | 405 |
+| 16, 17 | 78 | 36, 37 | 178 | 56, 57 | 311 | 76, 77 | 409 |
+| 18, 19 | 80 | 38, 39 | 181 | 58, 59 | 312 | 78, 79 | 415 |
+
+- **Mouth blendshapes, positions 80–91:** 80 `jawOpen`, 81 `mouthClose`, 82 `mouthFunnel`, 83 `mouthPucker`, 84 `mouthLowerDownLeft`, 85 `mouthLowerDownRight`, 86 `mouthUpperUpLeft`, 87 `mouthUpperUpRight`, 88 `mouthStretchLeft`, 89 `mouthStretchRight`, 90 `mouthRollLower`, 91 `mouthRollUpper`.
+- **Head pose, positions 92–94 (radians):** 92 yaw, 93 pitch, 94 roll.
+- **Loudness, position 95.**
+- **Other fixed numbers:** window 15 frames at 15 fps (`[1, 15, 96]`); missing landmarks held at most 2 frames; face crop 2.2× the face, resized to 256×256; Python/Swift parity tolerance 1e-6 (float32) and 1e-12 (float64).
+
 **Missing landmarks** (`FeatureHistory`, same rule in `features.py`; training uses it via `windows_from_track`)
 - A frame counts as *missing* when a tracked face has no landmarks (a coasting face or a MediaPipe miss), no blendshapes/matrix, or a mesh the builder rejects (fewer than 478 points, zero inter-ocular distance, a blendshape absent).
 - **Rule: repeat the last good frame, for at most 2 frames in a row.** A missing frame appends the last good frame's 95 face values with *this* frame's loudness. A 3rd consecutive miss, or a miss before any good frame, **starts that face's 15-frame history over**. 2 matches `FaceTracker.maxCoastFrames` (~133 ms at 15 fps): a blip doesn't cost a second of predictions, but stale lips are never fed for long.

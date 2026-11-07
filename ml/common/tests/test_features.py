@@ -111,3 +111,15 @@ def test_real_faces_fixture():
             real["image_width"], real["image_height"], real["loudness"],
         )
         assert vec == pytest.approx(face["expected"], abs=1e-12)
+
+
+def test_doc_position_map_matches_code():
+    """docs/GRAPTION_CONTEXT.md §6 lists every feature position; keep it in sync."""
+    doc = (make_fixtures.FIXTURE_PATH.parents[3] / "docs/GRAPTION_CONTEXT.md").read_text()
+    assert f"**Feature position map (`{F.FEATURE_SPEC_VERSION}`).**" in doc
+    for k, landmark in enumerate(F.LIP_LANDMARKS):
+        assert f"| {2 * k}, {2 * k + 1} | {landmark} |" in doc, f"lip point {landmark}"
+    for i, name in enumerate(F.BLENDSHAPE_NAMES):
+        assert f"{80 + i} `{name}`" in doc, name
+    assert "92 yaw, 93 pitch, 94 roll" in doc
+    assert "nose tip = **1**" in doc and "**468** and **473**" in doc
