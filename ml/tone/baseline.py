@@ -82,7 +82,6 @@ def main():
     #reads the arguments from the command line
     args = parser.parse_args()
     output_path = Path(args.out)
-    output_path.parent.mkdir(parents=True, exist_ok = True)
     #turns the folder that the Path supplied in terminal to a path that object Python can work with
     audio_dir = Path(args.audio_dir)
 
@@ -95,23 +94,26 @@ def main():
         parser.error(f"Audio path is not a directory: {audio_dir}")
 
     #looks at the files inside and checks file extension to only include audio files
-    audio_files = sorted(path for path in audio_dir.iterdir()
-                         if path.suffix.lower() in {".wav", ".mp3"}
+    audio_files = sorted(
+        path for path in audio_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in {".wav", ".mp3"}
     )
 
+    if not audio_files:
+        parser.error(
+            f"No supported audio clips in {audio_dir}. "
+            "Expected .wav or .mp3 files."
+        )
+
+    output_path.parent.mkdir(parents=True, exist_ok = True)
     #tells us how many supported audio files were found
     print(f"Found {len(audio_files)} audio files.")
 
     #Load and warm up the model only when there are clips to process
-    backend = None
-
-    #checks the folder to see if the folder contains at least one supported audio file
-    if audio_files:
-        #loads tone model once so we can reuse for subsequent clips
-        backend = AudeeringBackend()
-        warmup_audio, warmup_sample_rate = load_audio(audio_files[0])
-        #runs one prediction to warm up the model
-        backend.predict(warmup_audio, warmup_sample_rate)
+    backend = AudeeringBackend()
+    warmup_audio, warmup_sample_rate = load_audio(audio_files[0])
+    #runs one prediction to warm up the model
+    backend.predict(warmup_audio, warmup_sample_rate)
 
     #process each audio file and collect results
     #empty list to store the results from all clips

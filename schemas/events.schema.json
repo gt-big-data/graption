@@ -13,7 +13,7 @@
     { "$ref": "#/$defs/SessionError" }
   ],
   "$defs": {
-    "SchemaVersion": { "type": "string", "const": "1.2" },
+    "SchemaVersion": { "type": "string", "const": "1.3" },
     "SessionError": {
       "type": "object",
       "description": "Tone server -> client. Malformed request rejected; connection stays open. Request is echoed only to the originating client, never stored or logged.",

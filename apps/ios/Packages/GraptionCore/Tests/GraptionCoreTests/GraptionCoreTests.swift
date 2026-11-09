@@ -10,7 +10,7 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "speaker_scores",
         "session_id": "session-xyz",
-        "schema_version": "1.2",
+        "schema_version": "1.3",
         "t": 4.5,
         "faces": [
             {
@@ -26,7 +26,7 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "caption",
         "session_id": "session-xyz",
-        "schema_version": "1.2",
+        "schema_version": "1.3",
         "caption_id": "12345678-abcd-ef01-2345-6789abcdef01",
         "t_start": 1.0,
         "t_end": 3.5,
@@ -43,7 +43,7 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "sound_event",
         "session_id": "session-xyz",
-        "schema_version": "1.2",
+        "schema_version": "1.3",
         "t": 12.4,
         "label": "doorbell",
         "confidence": 0.92
@@ -54,7 +54,7 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "tone_request",
         "session_id": "session-xyz",
-        "schema_version": "1.2",
+        "schema_version": "1.3",
         "caption_id": "12345678-abcd-ef01-2345-6789abcdef01",
         "t_start": 1.0,
         "t_end": 3.5,
@@ -67,11 +67,11 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "caption_log",
         "session_id": "session-xyz",
-        "schema_version": "1.2",
+        "schema_version": "1.3",
         "caption": {
             "type": "caption",
             "session_id": "session-xyz",
-            "schema_version": "1.2",
+            "schema_version": "1.3",
             "caption_id": "12345678-abcd-ef01-2345-6789abcdef01",
             "t_start": 1.0,
             "t_end": 3.5,
@@ -87,7 +87,7 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "tone_result",
         "session_id": "session-xyz",
-        "schema_version": "1.2",
+        "schema_version": "1.3",
         "caption_id": "12345678-abcd-ef01-2345-6789abcdef01",
         "tag": null,
         "probs": { "anger": 0.0, "disgust": 0.0, "fear": 0.0, "happy": 0.0, "neutral": 0.0, "sad": 0.0 },
@@ -101,7 +101,7 @@ final class GraptionCoreTests: XCTestCase {
     {
         "type": "session_error",
         "session_id": "session-xyz",
-        "schema_version": "1.2",
+        "schema_version": "1.3",
         "code": "invalid_json",
         "message": "Request is not valid JSON.",
         "request": "{not json",

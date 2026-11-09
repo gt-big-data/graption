@@ -47,7 +47,7 @@ async def send_error(
         {
             "type": "session_error",
             "session_id": session_id,
-            "schema_version": "1.2",
+            "schema_version": "1.3",
             "code": code,
             "message": message,
             "request": request,
@@ -248,19 +248,28 @@ async def session(websocket: WebSocket, session_id: str = Query(min_length=1)) -
             metrics.inference_ms += inference_ms
             caption_id = event.caption_id.root
             del audio, message, event, raw, frame
-            result = ToneResult.model_validate(
-                {
-                    "type": "tone_result",
-                    "session_id": session_id,
-                    "schema_version": "1.2",
-                    "caption_id": caption_id,
-                    "tag": prediction.tag,
-                    "probs": prediction.probs,
-                    "model_version": prediction.model_version,
-                    "latency_ms": {"recv_to_send": (perf_counter() - received_at) * 1000},
-                }
-            )
-            encoded = result.model_dump_json()
+            result_data = {
+                "type": "tone_result",
+                "session_id": session_id,
+                "schema_version": "1.3",
+                "caption_id": caption_id,
+                "tag": prediction.tag,
+                "model_version": prediction.model_version,
+                "latency_ms": {"recv_to_send": (perf_counter() - received_at) * 1000},
+            }
+            if prediction.probs is not None:
+                result_data["probs"] = prediction.probs
+
+            if prediction.scores is not None:
+                result_data["scores"] = prediction.scores
+
+            result = ToneResult.model_validate(result_data)
+            exclude_fields =set()
+            if result.probs is None:
+                exclude_fields.add("probs")
+            if result.scores is None:
+                exclude_fields.add("scores")
+            encoded = result.model_dump_json(exclude=exclude_fields)
             send_started = perf_counter()
             await websocket.send_text(encoded)
             send_ms = (perf_counter() - send_started) * 1000

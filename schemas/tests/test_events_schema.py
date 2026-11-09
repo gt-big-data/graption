@@ -11,7 +11,7 @@ SCHEMA_PATH = Path(__file__).resolve().parents[1] / "events.schema.json"
 SCHEMA = json.loads(SCHEMA_PATH.read_text())
 VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
 
-BASE = {"session_id": "s-test", "schema_version": "1.2"}
+BASE = {"session_id": "s-test", "schema_version": "1.3"}
 CAPTION_ID = "3f1c2a9e-8b7d-4c6e-9a01-2b3c4d5e6f70"
 
 CAPTION = {
