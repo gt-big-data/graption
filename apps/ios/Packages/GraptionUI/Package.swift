@@ -12,9 +12,13 @@ let package = Package(
             targets: ["GraptionUI"]
         )
     ],
+    dependencies: [
+        .package(path: "../GraptionCore")
+    ],
     targets: [
         .target(
             name: "GraptionUI",
+            dependencies: ["GraptionCore"],
             resources: [
                 .process("Resources")
             ]

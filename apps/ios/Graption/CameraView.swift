@@ -11,129 +11,10 @@ import Accelerate
 import Combine
 import UIKit
 import Vision
+import simd
 import MediaPipeTasksVision
-
-nonisolated private struct OneEuroFilter {
-    private let minCutoff: Double
-    private let beta: Double
-    private let derivativeCutoff: Double
-    private var previousValue: Double?
-    private var previousDerivative = 0.0
-    private var previousTimestamp: Double?
-
-    // Inputs are normalized (0...1) image coordinates, so beta is much larger than the
-    // pixel-space defaults from the paper; otherwise the speed term never reduces lag.
-    init(minCutoff: Double = 1.25, beta: Double = 8.0, derivativeCutoff: Double = 1.0) {
-        self.minCutoff = minCutoff
-        self.beta = beta
-        self.derivativeCutoff = derivativeCutoff
-    }
-
-    mutating func filter(_ value: Double, at timestamp: Double) -> Double {
-        guard let previousValue, let previousTimestamp else {
-            self.previousValue = value
-            self.previousTimestamp = timestamp
-            return value
-        }
-
-        let deltaTime = max(timestamp - previousTimestamp, 1.0 / 120.0)
-        let rawDerivative = (value - previousValue) / deltaTime
-        let derivativeAlpha = smoothingFactor(deltaTime, cutoff: derivativeCutoff)
-        let derivative = exponentialFilter(
-            rawDerivative,
-            previous: self.previousDerivative,
-            alpha: derivativeAlpha
-        )
-        let valueAlpha = smoothingFactor(deltaTime, cutoff: minCutoff + beta * abs(derivative))
-        let filteredValue = exponentialFilter(value, previous: previousValue, alpha: valueAlpha)
-
-        self.previousValue = filteredValue
-        self.previousDerivative = derivative
-        self.previousTimestamp = timestamp
-        return filteredValue
-    }
-
-    private func smoothingFactor(_ deltaTime: Double, cutoff: Double) -> Double {
-        let tau = 1.0 / (2.0 * .pi * cutoff)
-        return 1.0 / (1.0 + tau / deltaTime)
-    }
-
-    private func exponentialFilter(_ value: Double, previous: Double, alpha: Double) -> Double {
-        alpha * value + (1.0 - alpha) * previous
-    }
-}
-
-/// One face as published to the UI. `box` and `landmarks` are normalized to the full,
-/// portrait-oriented frame with a top-left origin. `landmarks` is empty when the face was
-/// detected but too small or occluded for MediaPipe to fit a mesh.
-nonisolated struct FaceTrack: Identifiable, Sendable {
-    let id: Int
-    let box: CGRect
-    let landmarks: [SIMD3<Float>]
-
-    var hasLandmarks: Bool { !landmarks.isEmpty }
-}
-
-nonisolated private struct FaceMeasurement {
-    let box: CGRect
-    let landmarks: [SIMD3<Float>]
-}
-
-nonisolated private struct TrackedFace {
-    let id: Int
-    var box: CGRect
-    var landmarks: [SIMD3<Float>] = []
-    var velocity = CGPoint.zero
-    var missedFrames = 0
-    var xFilter = OneEuroFilter()
-    var yFilter = OneEuroFilter()
-    var widthFilter = OneEuroFilter()
-    var heightFilter = OneEuroFilter()
-    private var lastTimestamp: Double?
-
-    init(id: Int, measurement: FaceMeasurement, timestamp: Double) {
-        self.id = id
-        self.box = measurement.box
-        update(with: measurement, timestamp: timestamp)
-    }
-
-    mutating func update(with measurement: FaceMeasurement, timestamp: Double) {
-        let filtered = CGRect(
-            x: xFilter.filter(measurement.box.minX, at: timestamp),
-            y: yFilter.filter(measurement.box.minY, at: timestamp),
-            width: widthFilter.filter(measurement.box.width, at: timestamp),
-            height: heightFilter.filter(measurement.box.height, at: timestamp)
-        )
-        if let lastTimestamp {
-            let timeScale = max(timestamp - lastTimestamp, 1.0 / 120.0)
-            velocity = CGPoint(
-                x: (filtered.midX - box.midX) / timeScale,
-                y: (filtered.midY - box.midY) / timeScale
-            )
-        }
-        box = filtered
-        landmarks = measurement.landmarks
-        missedFrames = 0
-        lastTimestamp = timestamp
-    }
-
-    mutating func predict(at timestamp: Double) {
-        let deltaTime = max(timestamp - (lastTimestamp ?? timestamp), 1.0 / 120.0)
-        let decay = pow(0.65, deltaTime * 15.0)
-        box = box.offsetBy(
-            dx: velocity.x * deltaTime * decay,
-            dy: velocity.y * deltaTime * decay
-        )
-        velocity.x *= decay
-        velocity.y *= decay
-        // Landmarks from an older frame would no longer line up with the predicted box.
-        landmarks = []
-        missedFrames += 1
-        lastTimestamp = timestamp
-    }
-
-    var output: FaceTrack { FaceTrack(id: id, box: box, landmarks: landmarks) }
-}
+import GraptionUI
+import GraptionVision
 
 /// Where MediaPipe looks for landmarks. Detection always uses Apple Vision.
 nonisolated enum LandmarkMode: Sendable {
@@ -162,8 +43,9 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     private static let minFaceConfidence: Float = 0.5
 
     let session = AVCaptureSession()
-    /// Called on the video queue after every processed frame, with that frame's pixel size.
-    var onFaces: (([FaceTrack], CGSize) -> Void)?
+    /// called on the video queue after every frame with the tracked faces. the guessed speaker
+    /// id (nil if none). and the frame's pixel size.
+    var onFaces: (([FaceTrack], String?, CGSize) -> Void)?
     private var cameraPosition: AVCaptureDevice.Position = .back
     private var videoRotationAngle: CGFloat = 90
 
@@ -182,8 +64,10 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     private let sequenceHandler = VNSequenceRequestHandler()
     private var faceLandmarker: FaceLandmarker?
     private var cropPool: CVPixelBufferPool?
-    private var trackedFaces: [TrackedFace] = []
-    private var nextTrackID = 0
+    // v3. tracking lives in GraptionVision/FaceTracker.swift.
+    private var tracker = FaceTracker()
+    // largest face guess until the core ml speaker model replaces it behind SpeakerScorer.
+    private var speakerScorer: any SpeakerScorer = LargestFaceScorer()
     private var publishedEmpty = false
     private var lastLandmarkerTimestamp = -1
 
@@ -209,7 +93,8 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
                 session.stopRunning()
             }
             videoQueue.async { [self] in
-                trackedFaces.removeAll()
+                // camera stopped means session over. ids restart at f1.
+                tracker.reset()
             }
         }
     }
@@ -225,7 +110,8 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
             // Existing tracks are in the old orientation's coordinates.
             guard changed else { return }
             videoQueue.async { [self] in
-                trackedFaces.removeAll()
+                // not reset() since restarting at f1 mid session could hand an old id to someone new.
+                tracker.forgetTracks()
             }
         }
     }
@@ -259,7 +145,8 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
             session.commitConfiguration()
             configureCamera(for: device, fps: 15)
             videoQueue.async { [self] in
-                trackedFaces.removeAll()
+                // other camera means other people. new ids but numbering keeps counting.
+                tracker.forgetTracks()
                 publishedEmpty = false
             }
             completion(true)
@@ -291,8 +178,11 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
             }
             options.minFaceDetectionConfidence = 0.5
             options.minFacePresenceConfidence = 0.5
-            options.outputFaceBlendshapes = false
-            options.outputFacialTransformationMatrixes = false
+            // FeatureBuilder needs both: 12 mouth blendshapes and head pose from the matrix
+            // (GRAPTION_CONTEXT.md §6). With face crops the matrix's rotation is relative to
+            // the line of sight to that face; training crops the same way (§8).
+            options.outputFaceBlendshapes = true
+            options.outputFacialTransformationMatrixes = true
             let landmarker = try FaceLandmarker(options: options)
             let pool = landmarkMode == .faceCrops ? makeCropPool() : nil
             videoQueue.sync {
@@ -351,11 +241,12 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         guard timestamp.isFinite else { return }
 
         let frameSize = CGSize(width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
-        let faces = updateTracking(with: detectFaces(in: pixelBuffer, timestamp: timestamp), timestamp: timestamp)
+        let faces = tracker.update(with: detectFaces(in: pixelBuffer, timestamp: timestamp), at: timestamp)
+        let speaker = speakerScorer.scores(for: faces, at: timestamp).likelySpeaker()
         // Skip repeated empty updates so an empty room doesn't re-render SwiftUI at 15 fps.
         if faces.isEmpty && publishedEmpty { return }
         publishedEmpty = faces.isEmpty
-        onFaces?(faces, frameSize)
+        onFaces?(faces, speaker, frameSize)
     }
 
     // MARK: Detection
@@ -364,7 +255,9 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         let boxes = visionFaceBoxes(in: pixelBuffer)
         switch landmarkMode {
         case .faceCrops:
-            return boxes.map { FaceMeasurement(box: $0, landmarks: landmarks(around: $0, in: pixelBuffer)) }
+            return boxes.map { box in
+                landmarks(around: box, in: pixelBuffer)?.measurement(box: box) ?? FaceMeasurement(box: box)
+            }
         case .fullFrame:
             return attach(fullFrameMeshes(in: pixelBuffer, timestamp: timestamp), to: boxes)
         }
@@ -396,7 +289,7 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     }
 
     /// Runs MediaPipe once on the whole frame and returns every mesh it found.
-    private func fullFrameMeshes(in pixelBuffer: CVPixelBuffer, timestamp: Double) -> [[SIMD3<Float>]] {
+    private func fullFrameMeshes(in pixelBuffer: CVPixelBuffer, timestamp: Double) -> [FaceMesh] {
         guard let faceLandmarker else { return [] }
         // Video mode rejects non-increasing timestamps.
         let timestampInMilliseconds = Int(timestamp * 1_000)
@@ -408,7 +301,13 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
                 videoFrame: try MPImage(pixelBuffer: pixelBuffer),
                 timestampInMilliseconds: timestampInMilliseconds
             )
-            return result.faceLandmarks.map { face in face.map { SIMD3($0.x, $0.y, $0.z) } }
+            return result.faceLandmarks.indices.map { index in
+                FaceMesh(
+                    landmarks: result.faceLandmarks[index].map { SIMD3($0.x, $0.y, $0.z) },
+                    result: result,
+                    index: index
+                )
+            }
         } catch {
             print("MediaPipe detection error: \(error.localizedDescription)")
             return []
@@ -417,19 +316,22 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
 
     /// Pairs each Vision box with the mesh whose nose tip falls inside it. Meshes Vision
     /// missed still become measurements, boxed by their landmarks.
-    private func attach(_ meshes: [[SIMD3<Float>]], to boxes: [CGRect]) -> [FaceMeasurement] {
-        var unclaimed = meshes.filter { $0.count > 1 }
+    private func attach(_ meshes: [FaceMesh], to boxes: [CGRect]) -> [FaceMeasurement] {
+        var unclaimed = meshes.filter { $0.landmarks.count > 1 }
         var measurements = boxes.map { box -> FaceMeasurement in
             let searchArea = box.insetBy(dx: -box.width * 0.25, dy: -box.height * 0.25)
             let match = unclaimed.indices
-                .map { index in (index, CGPoint(x: CGFloat(unclaimed[index][1].x), y: CGFloat(unclaimed[index][1].y))) }
+                .map { index in
+                    let nose = unclaimed[index].landmarks[1]
+                    return (index, CGPoint(x: CGFloat(nose.x), y: CGFloat(nose.y)))
+                }
                 .filter { searchArea.contains($0.1) }
                 .min { hypot($0.1.x - box.midX, $0.1.y - box.midY) < hypot($1.1.x - box.midX, $1.1.y - box.midY) }
             guard let match else { return FaceMeasurement(box: box, landmarks: []) }
-            return FaceMeasurement(box: box, landmarks: unclaimed.remove(at: match.0))
+            return unclaimed.remove(at: match.0).measurement(box: box)
         }
         for mesh in unclaimed where measurements.count < Self.maxFaces {
-            measurements.append(FaceMeasurement(box: boundingBox(of: mesh), landmarks: mesh))
+            measurements.append(mesh.measurement(box: boundingBox(of: mesh.landmarks)))
         }
         return measurements
     }
@@ -453,16 +355,17 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     }
 
     /// Runs MediaPipe on a square crop centered on `box` and returns the mesh in full-frame
-    /// normalized coordinates, or an empty array if no face is found in the crop.
-    private func landmarks(around box: CGRect, in pixelBuffer: CVPixelBuffer) -> [SIMD3<Float>] {
+    /// normalized coordinates, or nil if no face is found in the crop. Blendshapes and the
+    /// transformation matrix come from the crop as-is (rotation only is used downstream).
+    private func landmarks(around box: CGRect, in pixelBuffer: CVPixelBuffer) -> FaceMesh? {
         guard let faceLandmarker,
-              CVPixelBufferGetPixelFormatType(pixelBuffer) == kCVPixelFormatType_32BGRA else { return [] }
+              CVPixelBufferGetPixelFormatType(pixelBuffer) == kCVPixelFormatType_32BGRA else { return nil }
 
         let frameWidth = CVPixelBufferGetWidth(pixelBuffer)
         let frameHeight = CVPixelBufferGetHeight(pixelBuffer)
         let faceSide = max(box.width * CGFloat(frameWidth), box.height * CGFloat(frameHeight))
         let side = min(Int(faceSide * Self.cropScale), frameWidth, frameHeight)
-        guard side >= 16 else { return [] }
+        guard side >= 16 else { return nil }
         // Shift (not shrink) the crop to stay inside the frame so it remains square.
         let originX = min(max(Int(box.midX * CGFloat(frameWidth)) - side / 2, 0), frameWidth - side)
         let originY = min(max(Int(box.midY * CGFloat(frameHeight)) - side / 2, 0), frameHeight - side)
@@ -472,39 +375,41 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
             originX: originX,
             originY: originY,
             side: side
-        ) else { return [] }
+        ) else { return nil }
 
         let result: FaceLandmarkerResult
         do {
             result = try faceLandmarker.detect(image: try MPImage(pixelBuffer: crop))
         } catch {
             print("MediaPipe detection error: \(error.localizedDescription)")
-            return []
+            return nil
         }
 
         // Of the faces found in the crop, keep the one nearest its center (the Vision face).
-        let best = result.faceLandmarks
-            .map { face -> (face: [NormalizedLandmark], distance: Float) in
+        let best = result.faceLandmarks.indices
+            .map { index -> (index: Int, distance: Float) in
+                let face = result.faceLandmarks[index]
                 // Mesh index 1 is the nose tip.
-                guard face.count > 1 else { return (face, .greatestFiniteMagnitude) }
+                guard face.count > 1 else { return (index, .greatestFiniteMagnitude) }
                 let nose = face[1]
-                return (face, hypotf(nose.x - 0.5, nose.y - 0.5))
+                return (index, hypotf(nose.x - 0.5, nose.y - 0.5))
             }
             .min { $0.distance < $1.distance }
-        guard let best, best.distance < 0.25 else { return [] }
+        guard let best, best.distance < 0.25 else { return nil }
 
         let scale = Float(side)
         let width = Float(frameWidth)
         let height = Float(frameHeight)
         let offsetX = Float(originX)
         let offsetY = Float(originY)
-        return best.face.map { landmark in
+        let landmarks = result.faceLandmarks[best.index].map { landmark in
             SIMD3(
                 (offsetX + landmark.x * scale) / width,
                 (offsetY + landmark.y * scale) / height,
                 landmark.z * scale / width
             )
         }
+        return FaceMesh(landmarks: landmarks, result: result, index: best.index)
     }
 
     private func makeCrop(
@@ -557,51 +462,6 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         return pool
     }
 
-    // MARK: Tracking
-
-    private func updateTracking(with measurements: [FaceMeasurement], timestamp: Double) -> [FaceTrack] {
-        // Greedy assignment over all pairs, closest first, so one face can't steal another's
-        // track just because it was detected earlier in the list.
-        var candidates: [(track: Int, measurement: Int, distance: CGFloat)] = []
-        for trackIndex in trackedFaces.indices {
-            let track = trackedFaces[trackIndex].box
-            let maxDistance = max(track.width, track.height) * 1.5
-            for measurementIndex in measurements.indices {
-                let distance = distance(from: track, to: measurements[measurementIndex].box)
-                if distance <= maxDistance {
-                    candidates.append((trackIndex, measurementIndex, distance))
-                }
-            }
-        }
-        candidates.sort { $0.distance < $1.distance }
-
-        var unmatchedTracks = Set(trackedFaces.indices)
-        var unmatchedMeasurements = Set(measurements.indices)
-        for candidate in candidates
-        where unmatchedTracks.contains(candidate.track) && unmatchedMeasurements.contains(candidate.measurement) {
-            trackedFaces[candidate.track].update(with: measurements[candidate.measurement], timestamp: timestamp)
-            unmatchedTracks.remove(candidate.track)
-            unmatchedMeasurements.remove(candidate.measurement)
-        }
-
-        for trackIndex in unmatchedTracks {
-            trackedFaces[trackIndex].predict(at: timestamp)
-        }
-        for measurementIndex in unmatchedMeasurements.sorted() {
-            trackedFaces.append(
-                TrackedFace(id: nextTrackID, measurement: measurements[measurementIndex], timestamp: timestamp)
-            )
-            nextTrackID += 1
-        }
-        trackedFaces.removeAll { $0.missedFrames > 2 || $0.box.maxX < 0 || $0.box.minX > 1 ||
-            $0.box.maxY < 0 || $0.box.minY > 1 }
-        return trackedFaces.map(\.output)
-    }
-
-    private func distance(from lhs: CGRect, to rhs: CGRect) -> CGFloat {
-        hypot(lhs.midX - rhs.midX, lhs.midY - rhs.midY)
-    }
-
     // MARK: Camera
 
     /// Rotation and mirroring are set on the analyzed frames, not only the preview.
@@ -647,6 +507,37 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     }
 }
 
+/// One MediaPipe face: landmarks in full-frame coordinates plus the blendshapes and
+/// transformation matrix from the same result index.
+nonisolated struct FaceMesh {
+    let landmarks: [SIMD3<Float>]
+    let blendshapes: [String: Float]
+    let transform: simd_float4x4?
+
+    init(landmarks: [SIMD3<Float>], result: FaceLandmarkerResult, index: Int) {
+        self.landmarks = landmarks
+        var scores: [String: Float] = [:]
+        if index < result.faceBlendshapes.count {
+            for category in result.faceBlendshapes[index].categories {
+                if let name = category.categoryName { scores[name] = category.score }
+            }
+        }
+        blendshapes = scores
+        if index < result.facialTransformationMatrixes.count {
+            let matrix = result.facialTransformationMatrixes[index]
+            transform = matrix.rows == 4 && matrix.columns == 4
+                ? FeatureBuilder.matrix { matrix.value(atRow: UInt($0), column: UInt($1)) }
+                : nil
+        } else {
+            transform = nil
+        }
+    }
+
+    func measurement(box: CGRect) -> FaceMeasurement {
+        FaceMeasurement(box: box, landmarks: landmarks, blendshapes: blendshapes, transform: transform)
+    }
+}
+
 final class CameraController: ObservableObject {
     enum Status {
         case notDetermined
@@ -659,6 +550,8 @@ final class CameraController: ObservableObject {
     @Published private(set) var status: Status = .notDetermined
     @Published private(set) var faces: [FaceTrack] = []
     @Published private(set) var cameraPosition: AVCaptureDevice.Position = .back
+    /// id of the face drawn as the speaker. nil when no faces.
+    @Published private(set) var speakerID: String?
     /// Width / height of the analyzed frames; flips when the phone rotates.
     @Published private(set) var captureAspectRatio: CGFloat = 9.0 / 16.0
     private var isSwitchingCamera = false
@@ -669,9 +562,10 @@ final class CameraController: ObservableObject {
     var session: AVCaptureSession { engine.session }
 
     init() {
-        engine.onFaces = { [weak self] faces, frameSize in
+        engine.onFaces = { [weak self] faces, speakerID, frameSize in
             DispatchQueue.main.async {
                 self?.faces = faces
+                self?.speakerID = speakerID
                 self?.captureAspectRatio = frameSize.width / frameSize.height
             }
         }
@@ -703,6 +597,7 @@ final class CameraController: ObservableObject {
     func stop() {
         engine.stop()
         faces = []
+        speakerID = nil
     }
 
     func setVideoRotationAngle(_ angle: CGFloat) {
@@ -720,6 +615,7 @@ final class CameraController: ObservableObject {
                 guard success else { return }
                 self.cameraPosition = next
                 self.faces = []
+                self.speakerID = nil
             }
         }
     }
@@ -817,6 +713,9 @@ private struct CameraPreview: UIViewRepresentable {
 struct CameraView: View {
     @StateObject private var controller = CameraController()
     @Environment(\.dismiss) private var dismiss
+    /// False when embedded in the live caption screen, which supplies its own menu.
+    @Environment(\.isPresented) private var isPresented
+    var captions: [LiveCaption] = []
 
     var body: some View {
         ZStack {
@@ -835,22 +734,16 @@ struct CameraView: View {
 
                             ForEach(controller.faces) { face in
                                 FaceBox(
+                                    id: face.id,
                                     box: face.box,
                                     hasLandmarks: face.hasLandmarks,
+                                    transform: face.transform,
+                                    isSpeaker: face.id == controller.speakerID,
                                     size: geometry.size,
-                                    sourceAspectRatio: controller.captureAspectRatio
+                                    sourceAspectRatio: controller.captureAspectRatio,
+                                    color: speakerBoxColor()
                                 )
                             }
-
-                            Text("Faces: \(controller.faces.count)")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(.black.opacity(0.6), in: Capsule())
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                                .padding(.top, 16)
-                                .padding(.trailing, 16)
                         }
                     }
                     .ignoresSafeArea()
@@ -871,18 +764,22 @@ struct CameraView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.backward")
-                    .font(.system(size: 20, weight: .bold))
-                    .frame(width: 30, height: 36)
+            if isPresented {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.backward")
+                        .font(.system(size: 20, weight: .bold))
+                        .frame(width: 30, height: 36)
+                }
+                .padding(.top, 12)
+                .padding(.leading, 16)
+                .tint(.white)
             }
-            .padding(.top, 12)
-            .padding(.leading, 16)
-            .tint(.white)
         }
-        .overlay(alignment: .bottomTrailing) {
+        // Embedded, the bottom belongs to captions, so the flip button stacks under the
+        // controls menu (56 pt, 16 pt from the top-right corner).
+        .overlay(alignment: isPresented ? .bottomTrailing : .topTrailing) {
             if controller.status == .running {
                 Button(action: controller.flipCamera) {
                     Image(systemName: "arrow.triangle.2.circlepath.camera")
@@ -891,8 +788,8 @@ struct CameraView: View {
                         .frame(width: 52, height: 52)
                         .background(.black.opacity(0.45), in: Circle())
                 }
-                .padding(.trailing, 16)
-                .padding(.bottom, 16)
+                .padding(isPresented ? .bottom : .top, isPresented ? 16 : 84)
+                .padding(.trailing, isPresented ? 16 : 18)
                 .accessibilityLabel(controller.cameraPosition == .back ? "Use selfie camera" : "Use back camera")
             }
         }
@@ -913,15 +810,38 @@ struct CameraView: View {
         .foregroundStyle(.white)
         .padding()
     }
+
+    private func speakerBoxColor() -> Color {
+        speakerCaptionColor(captions.first?.speakerName)
+    }
 }
 
 /// Solid when MediaPipe fit a mesh to the face; dashed when only Vision detected it
 /// (usually a face too small or turned away for landmarks).
+/// The outline uses the active caption's speaker color. The label still shows the track id.
 private struct FaceBox: View {
+    #if DEBUG
+    /// Head-pose readout under each face box (yaw/pitch/roll in degrees, the same values as
+    /// features 92-94). Set to `true` to check head pose on a phone (GRAPTION_CONTEXT.md §6).
+    /// Debug builds only: Release/TestFlight never include it, whatever this is set to.
+    static let showsHeadPose = false
+
+    static func headPoseText(_ transform: simd_float4x4?) -> String {
+        guard let transform else { return "no pose" }
+        let degrees = FeatureBuilder.headPose(transform).map { Int(($0 * 180 / .pi).rounded()) }
+        return "yaw \(degrees[0])° pitch \(degrees[1])° roll \(degrees[2])°"
+    }
+    #endif
+
+    let id: String
     let box: CGRect
     let hasLandmarks: Bool
+    /// MediaPipe's facial transformation matrix; drives the debug head-pose readout.
+    let transform: simd_float4x4?
+    let isSpeaker: Bool
     let size: CGSize
     let sourceAspectRatio: CGFloat
+    let color: Color
 
     var body: some View {
         let scale = max(size.width / sourceAspectRatio, size.height)
@@ -931,11 +851,34 @@ private struct FaceBox: View {
         let verticalCrop = (renderedHeight - size.height) / 2
 
         Rectangle()
-            .stroke(.yellow, style: StrokeStyle(lineWidth: 3, dash: hasLandmarks ? [] : [8, 6]))
+            .stroke(color, style: StrokeStyle(lineWidth: 3, dash: hasLandmarks ? [] : [8, 6]))
             .frame(
                 width: box.width * renderedWidth,
                 height: box.height * renderedHeight
             )
+            .overlay(alignment: .topLeading) {
+                // The id stays visible so a returning face can be checked against the same track.
+                Text(isSpeaker ? "\(id) talking" : id)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 4)
+                    .background(color)
+                    .offset(y: -18)
+            }
+            #if DEBUG
+            // Head-pose check (GRAPTION_CONTEXT.md §6), toggled by `FaceBox.showsHeadPose`.
+            .overlay(alignment: .bottomLeading) {
+                if Self.showsHeadPose {
+                    Text(Self.headPoseText(transform))
+                        .font(.caption.monospacedDigit().weight(.bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 4)
+                        .background(color)
+                        .fixedSize()
+                        .offset(y: 18)
+                }
+            }
+            #endif
             .position(
                 x: box.midX * renderedWidth - horizontalCrop,
                 y: box.midY * renderedHeight - verticalCrop

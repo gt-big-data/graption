@@ -1,4 +1,5 @@
 import SwiftUI
+import GraptionCore
 
 struct CaptionBubbleView: View {
     let caption: LiveCaption
@@ -6,10 +7,12 @@ struct CaptionBubbleView: View {
     private let seeThrough = 0.68
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let speakerColor = colorForSpeaker(caption.speakerName)
+
+        return VStack(alignment: .leading, spacing: 6) {
             Text(caption.speakerName)
                 .font(.subheadline.bold())
-                .foregroundStyle(Color.graptionAccent)
+                .foregroundStyle(speakerColor)
                 .shadow(color: .black.opacity(0.7), radius: 2, y: 1)
 
             if let tag = caption.toneTag {
@@ -42,12 +45,12 @@ struct CaptionBubbleView: View {
         }
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.12 + (1 - seeThrough) * 0.4), lineWidth: 0.75)
+                .stroke(speakerColor.opacity(0.5), lineWidth: 2)
         )
         .shadow(color: .black.opacity(0.06 + (1 - seeThrough) * 0.2), radius: 12, y: 6)
         .animation(.easeOut(duration: 0.25), value: caption.toneTag)
     }
-}
+    }
 
 #Preview {
     CaptionBubbleView(caption: LiveCaption(speakerName: "Daniel", toneTag: "Question", text: "Say that again?"))

@@ -16,9 +16,11 @@ public struct SettingsScreen: View {
 
     @State private var showCameraPreview = false
     private let cameraPreviewDestination: (() -> AnyView)?
+    private let onBack: (() -> Void)?
 
-    public init(cameraPreviewDestination: (() -> AnyView)? = nil) {
+    public init(cameraPreviewDestination: (() -> AnyView)? = nil, onBack: (() -> Void)? = nil) {
         self.cameraPreviewDestination = cameraPreviewDestination
+        self.onBack = onBack
     }
 
     public var body: some View {
@@ -53,7 +55,11 @@ public struct SettingsScreen: View {
     private var header: some View {
         HStack(spacing: 8) {
             CircleIconButton(systemName: "chevron.left", accessibilityLabel: "Back to live captions") {
-                dismiss()
+                if let onBack {
+                    onBack()
+                } else {
+                    dismiss()
+                }
             }
 
             VStack(alignment: .leading, spacing: 2) {

@@ -19,13 +19,13 @@ Wi-Fi or phone hotspot, the phone connects to
 ## Session protocol
 
 Send JSON text frames matching `schemas/events.schema.json`, including `session_id`
-and `schema_version: "1.2"`. Example sentence audio (PCM16 mono little-endian, base64):
+and `schema_version: "1.3"`. Example sentence audio (PCM16 mono little-endian, base64):
 
 ```json
 {
   "type": "tone_request",
   "session_id": "demo",
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "caption_id": "3f1c2a9e-8b7d-4c6e-9a01-2b3c4d5e6f70",
   "t_start": 1.0,
   "t_end": 1.1,
@@ -34,9 +34,10 @@ and `schema_version: "1.2"`. Example sentence audio (PCM16 mono little-endian, b
 }
 ```
 
-Each request gets a `tone_result` with the same session and caption IDs, `tag: null`
-("no tone"), six zero probabilities, `model_version: "tone-stub-v1"`, and
-`latency_ms.recv_to_send`. The connection stays open for further requests.
+Each request gets a `tone_result` with the same session and caption IDs, a `tag`, six
+probabilities, `model_version`, and `latency_ms.recv_to_send`. With the default mock backend
+the tag is always `null` ("no tone"), the probabilities are zero, and the model version is
+`tone-stub-v1`; see "Real tone tags" below. The connection stays open for further requests.
 `caption_log` events are accepted and discarded; persistence is not implemented yet.
 Invalid messages receive a `session_error` reply and the connection stays open:
 
@@ -44,7 +45,7 @@ Invalid messages receive a `session_error` reply and the connection stays open:
 {
   "type": "session_error",
   "session_id": "demo",
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "code": "invalid_json",
   "message": "Invalid JSON at line 1, column 1: Expecting value",
   "request": "not json",
@@ -68,9 +69,33 @@ Query strings decode `+` as a space; encode a literal plus as `%2B`.
 Request contents, audio, authorization headers, and validation exception details are
 never logged or stored. Error replies echo payloads only to the client that sent them.
 
-`app/tone.py` defines `ToneBackend` and `MockToneBackend`. The server currently always
-uses the mock; Audio can plug in inference later. No audio is written to disk or logs.
-Torch and MediaPipe stay out of this package's dependencies.
+## Real tone tags (audEERING baseline)
+
+`TONE_BACKEND` picks the backend: `mock` (default) or `audeering`. One-time setup from the
+repo root downloads the model (~1.2 GB) into the Hugging Face cache, never into the repo:
+
+```bash
+uv run hf download audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim
+```
+
+Then start the server with the real model:
+
+```bash
+TONE_BACKEND=audeering uv run --directory server python -m app
+```
+
+Tags are `excited`, `upset`, `calm`, or `null`, from the arousal/valence thresholds tuned in
+A4 (`AudeeringThresholds` in `app/tone.py`). Segments under 0.5 s always get `null`, and
+`probs` stay zero because the model has no 6-emotion output. `model_version` is
+`audeering-msp-dim-a4`. The model runs on `cuda`, `mps`, or `cpu`, whichever is available,
+one segment at a time, off the event loop. On an M-series Mac a 3 s segment takes ~40 ms
+after the first request (~0.5 s warm-up). Check it with the P3 replay client
+(`scripts/README.md`). If the model isn't downloaded, startup fails with the command above.
+
+`app/tone.py` defines `ToneBackend`, `MockToneBackend`, the tag rules, and `create_backend`.
+`app/audeering.py` holds the model and is imported only when selected. No audio is written
+to disk or logs. Torch, transformers, and scipy come from the uv workspace (`graption-ml`);
+they are not dependencies of this package, and MediaPipe stays out entirely.
 
 Export `TONE_TOKEN` to require `Authorization: Bearer <token>` on the handshake.
 Export `DEPLOY_MODE=tunnel` or `cloud` to require a configured token as well.
@@ -123,7 +148,8 @@ uv run ruff check .
 uv run pytest
 ```
 
-Tests cover health, repeated audio replies, the schema contract, caption logs,
+`RUN_MODEL_TESTS=1 uv run pytest server/tests/test_tone.py` also runs the downloaded model.
+Tests cover tag thresholds, backend selection, health, repeated audio replies, the schema contract, caption logs,
 recoverable errors with exact request echoes, and token checks. `app/events.py` is generated; never hand-edit it.
 Regenerate it from the repo root with:
 
@@ -136,5 +162,43 @@ uv run datamodel-codegen \
   --formatters ruff-check ruff-format
 ```
 
-Later: tag mapping, SQLite logging, and Docker packaging. Add server dependencies with
+Later: the custom WavLM backend, SQLite logging, and Docker packaging. Add server dependencies with
 `uv add --package graption-server <pkg>`; tests live in `server/tests/`.
+
+
+## Optional Mac transcription
+
+The separate `/ws/asr` endpoint accepts finished 16 kHz mono PCM16 segments and
+returns one final transcript per request. It does not store or log request audio.
+The mock backend returns unavailable, so the app falls back to WhisperKit.
+
+On Apple Silicon, install the optional runtime and cache a checkpoint before startup:
+
+```sh
+uv sync --package graption-server --extra asr
+uv run --no-sync python - <<'PYMODEL'
+from pathlib import Path
+from huggingface_hub import snapshot_download
+print(snapshot_download(
+    "mlx-community/whisper-base.en-mlx",
+    revision="aa0678c3466ed62c5c6114ec600a0e1f96820089",
+    cache_dir=Path.home() / "Library/Caches/Graption/huggingface",
+    allow_patterns=["config.json", "weights.npz"],
+))
+PYMODEL
+```
+
+From the repository root, set `ASR_MODEL_PATH` to the printed snapshot path:
+
+```sh
+ASR_BACKEND=mlx \
+ASR_MODEL_PATH="/path/to/cached/snapshot" \
+ASR_MODEL_REVISION=aa0678c3466ed62c5c6114ec600a0e1f96820089 \
+uv run --no-sync uvicorn app.main:app --app-dir server --host 0.0.0.0 --port 8000 \
+  --ws-max-size 450000 --log-level info
+```
+
+Set `ASR_TOKEN` in the server environment and local iOS configuration if using
+authentication (required outside local deployment mode). Use plain WS only on a
+trusted local network. Keep uvicorn frame logging disabled. Both app and server
+must use schema 1.3; rebuild the phone app when updating the server.

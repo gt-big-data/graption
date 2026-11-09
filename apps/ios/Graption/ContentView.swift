@@ -1,14 +1,29 @@
 import SwiftUI
 import GraptionAudio
+import GraptionNetwork
 import GraptionUI
 
 @MainActor
 struct ContentView: View {
+    @State private var showHomeScreen = true
+    @State private var showTranscript = false
+    @State private var showSettings = false
+    @State private var showSavedSessions = false
+    @State private var transcriptReturnsToLive = false
     @State private var capture: MicrophoneCapture?
+    @StateObject private var toneMonitor = ToneConnectionMonitor(
+        configuration: ToneClientConfiguration.fromAppConfiguration(
+            sessionID: UUID().uuidString
+        )
+    )
     @State private var soundAlertModel = SoundAlertModel()
     @State private var hasPrintedLabels = false
     @State private var isVisible = false
     @State private var pipeline = CaptionPipeline()
+    @State private var localTranscriber = WhisperKitTranscriber()
+    @State private var asrClient: ASRClient?
+    @State private var pendingCaptions = 0
+    @State private var flushingCapture = false
     @State private var isRecording = false
     @State private var isCalibrating = false
     @State private var calibrationCount: Int?
@@ -19,16 +34,37 @@ struct ContentView: View {
     @State private var status = "Loading base.en…"
     @State private var setupFailed = false
     @State private var captions: [CaptionEntry] = []
+    /// Captions whose on-screen time is up. They leave the camera view but stay in the transcript.
+    @State private var expiredCaptionIDs: Set<UUID> = []
     @State private var listenTask: Task<Void, Never>?
 
     private var canListen: Bool {
         capture != nil && isReady && !isPreparing && !isCalibrating && !isStarting
+            && (isRecording || (pendingCaptions == 0 && !flushingCapture))
     }
 
-    /// Newest three captions, oldest on the left, matching the three-bubble layout.
+    /// At most three unexpired captions, oldest first, matching the three-bubble layout.
     private var bubbleCaptions: [LiveCaption] {
-        captions.prefix(3).reversed().map { entry in
-            LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text)
+        Array(captions.filter { !expiredCaptionIDs.contains($0.id) }.prefix(3))
+            .reversed()
+            .map { entry in
+                LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text)
+            }
+    }
+
+    /// How long a caption stays over the camera: reading time at 2.5 words per second
+    /// (150 wpm, the adult rate in DCMP captioning guidance), held for 4 to 8 seconds.
+    static func onScreenSeconds(for text: String) -> Double {
+        let words = text.split(whereSeparator: \.isWhitespace).count
+        return min(8, max(4, Double(words) / 2.5))
+    }
+
+    private func scheduleExpiry(of entry: CaptionEntry) {
+        let id = entry.id
+        let seconds = Self.onScreenSeconds(for: entry.text)
+        Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            expiredCaptionIDs.insert(id)
         }
     }
 
@@ -39,14 +75,56 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if isReady {
+            if showSettings {
+                SettingsScreen(
+                    cameraPreviewDestination: { AnyView(CameraView(captions: bubbleCaptions)) },
+                    onBack: {
+                        showSettings = false
+                        showHomeScreen = true
+                    }
+                )
+            } else if showTranscript {
+                TranscriptScreen(
+                    captions: captions.map { entry in
+                        TranscriptCaption(
+                            id: entry.id,
+                            speaker: "Someone",
+                            text: entry.text,
+                            tone: nil
+                        )
+                    },
+                    onHome: {
+                        showTranscript = false
+                        showHomeScreen = !transcriptReturnsToLive
+                    }
+                )
+            } else if showHomeScreen {
+                HomeScreen(
+                    serverStatus: toneMonitor.state.label,
+                    onOpenLiveCaptions: {
+                        showHomeScreen = false
+                    },
+                    onOpenSettings: {
+                        showSettings = true
+                        showHomeScreen = false
+                    },
+                    onOpenTranscript: {
+                        transcriptReturnsToLive = false
+                        showTranscript = true
+                        showHomeScreen = false
+                    },
+                    onOpenSavedSessions: {
+                        showSavedSessions = true
+                    }
+                )
+            } else if isReady {
                 LiveCaptionScreen(
-                    cameraPreviewDestination: { AnyView(CameraView()) },
+                    cameraPreviewDestination: { AnyView(CameraView(captions: bubbleCaptions)) },
                     captions: bubbleCaptions,
                     soundAlert: bannerAlert,
                     isListening: isRecording || isCalibrating,
                     canListen: canListen,
-                    statusText: status,
+                    statusText: "\(status) · \(toneMonitor.state.label)",
                     onMicrophone: {
                         if isRecording || isCalibrating {
                             stopListening()
@@ -55,7 +133,17 @@ struct ContentView: View {
                         }
                     },
                     calibrationCount: calibrationCount,
-                    isSettingUp: isPreparing
+                    isSettingUp: isPreparing,
+                    onHome: {
+                        // Leaving live captions turns the microphone off; the
+                        // screen-level .onDisappear doesn't fire for in-place swaps.
+                        if isRecording || isCalibrating { stopListening() }
+                        showHomeScreen = true
+                    },
+                    onTranscript: {
+                        transcriptReturnsToLive = true
+                        showTranscript = true
+                    }
                 )
             } else {
                 InstallBaseEnPage(isInstalling: isPreparing, detail: setupFailed ? status : nil) {
@@ -63,15 +151,20 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(isPresented: $showSavedSessions) {
+            SavedSessionsView()
+        }
         .animation(.default, value: soundAlertModel.currentAlert?.id)
         .sensoryFeedback(.warning, trigger: soundAlertModel.currentAlert?.id) { _, new in
             new != nil
         }
         .task {
             isVisible = true
+            toneMonitor.start()
             do {
                 // Reuse one capture so calibration survives Stop/Start.
                 if capture == nil {
+                    pipeline = CaptionPipeline(transcriber: localTranscriber)
                     capture = MicrophoneCapture(
                         vad: EnergyVAD(threshold: 0.001),
                         soundDetector: try AppleSoundDetector()
@@ -86,12 +179,15 @@ struct ContentView: View {
         }
         .onDisappear {
             isVisible = false
+            toneMonitor.stop()
             listenTask?.cancel()
             capture?.onSegment = nil
             capture?.onSoundAlert = nil
             capture?.stop()
             soundAlertModel.clear()
             pipeline.reset()
+            closeASRConnection()
+            pendingCaptions = 0
             isRecording = false
             isCalibrating = false
             calibrationCount = nil
@@ -105,7 +201,11 @@ struct ContentView: View {
             guard isRecording, !isCalibrating, isVisible else { return }
             soundAlertModel.show(alert)
         }
-        capture.onSegment = { segment in pipeline.enqueue(segment) }
+        capture.onSegment = { segment in
+            guard isVisible else { return }
+            pendingCaptions += 1
+            pipeline.enqueue(segment)
+        }
         capture.onError = { error in
             if isCalibrating {
                 capture.stop()
@@ -114,10 +214,16 @@ struct ContentView: View {
             report(error)
         }
         pipeline.onError = { id, error in
+            captionFinished()
             report(error, captionID: id)
         }
         pipeline.onResult = { delivery in
+            captionFinished()
             let caption = delivery.result
+            if isRecording, asrClient != nil {
+                status = caption.asrModelVersion.hasPrefix("mlx-whisper-")
+                    ? "Listening — Mac captions" : "Listening — iPhone captions"
+            }
             // Retained for later queue/UI diagnostics: measures enqueue-to-callback
             // time, including queue wait and ASR, but not the actual visible frame.
             // let delay = CaptionPipeline.seconds(delivery.receivedAt.duration(to: .now))
@@ -143,11 +249,13 @@ struct ContentView: View {
             let isShortEmpty = caption.tEnd - caption.tStart < 1 && displayText.isEmpty
             guard !isBlankAudio, !isShortEmpty else { return }
             // Stable caption IDs keep cards distinct when newer results arrive.
-            captions.insert(CaptionEntry(
+            let entry = CaptionEntry(
                 result: caption,
                 text: displayText.isEmpty ? "[No speech recognized]" : displayText,
                 transcriptionSeconds: delivery.transcriptionSeconds
-            ), at: 0)
+            )
+            captions.insert(entry, at: 0)
+            scheduleExpiry(of: entry)
         }
     }
 
@@ -176,7 +284,7 @@ struct ContentView: View {
     /// 3 seconds leaves room for the microphone to start.
     private func listen() async {
         guard let capture else { return }
-        guard !isRecording, !isCalibrating, !isStarting else { return }
+        guard canListen, !isRecording else { return }
         isStarting = true
         defer { isStarting = false }
         guard await capture.requestPermission() else {
@@ -187,6 +295,7 @@ struct ContentView: View {
         pipeline.reset()
         soundAlertModel.clear()
         captions.removeAll()
+        expiredCaptionIDs.removeAll()
         do {
             try capture.start(calibrating: true)
         } catch {
@@ -217,6 +326,20 @@ struct ContentView: View {
         }
         guard !Task.isCancelled, isVisible else { return }
         do {
+            closeASRConnection()
+            var transcriber: any CaptionTranscriber = localTranscriber
+            if let configuration = ASRClientConfiguration.fromAppConfiguration() {
+                let client = ASRClient(configuration: configuration)
+                asrClient = client
+                transcriber = FallbackCaptionTranscriber(
+                    remote: MacCaptionTranscriber(client: client), local: localTranscriber
+                )
+            }
+            pipeline = CaptionPipeline(transcriber: transcriber)
+            configureCallbacks()
+            try await pipeline.prepare(allowDownload: false)
+            try Task.checkCancellation()
+            guard isVisible else { return }
             try capture.start()
             isRecording = true
             status = "Listening"
@@ -232,9 +355,26 @@ struct ContentView: View {
         isRecording = false
         listenTask?.cancel()
         listenTask = nil
+        flushingCapture = true
         capture?.stop()
+        // Stop enqueues any flushed segment on the main queue before this block.
+        DispatchQueue.main.async {
+            flushingCapture = false
+            if pendingCaptions == 0 { closeASRConnection() }
+        }
         soundAlertModel.clear()
         status = wasCalibrating ? "Ready" : "Stopped; finishing pending captions"
+    }
+
+    private func captionFinished() {
+        pendingCaptions = max(0, pendingCaptions - 1)
+        if !isRecording, !flushingCapture, pendingCaptions == 0 { closeASRConnection() }
+    }
+
+    private func closeASRConnection() {
+        guard let client = asrClient else { return }
+        asrClient = nil
+        Task { await client.disconnect() }
     }
 
     private func printKnownLabelsOnce() {
@@ -294,3 +434,17 @@ private struct CaptionEntry: Identifiable {
     var id: UUID { result.captionID }
 }
 
+
+/// Bridges the network package to the audio package without coupling their APIs.
+private struct MacCaptionTranscriber: CaptionTranscriber {
+    let client: ASRClient
+
+    func prepare(allowDownload: Bool) async throws {}
+
+    func transcribe(_ segment: AudioSegment) async throws -> TranscriptionResult {
+        let reply = try await client.transcribe(captionID: segment.captionID,
+            tStart: segment.tStart, tEnd: segment.tEnd, samples: segment.samples)
+        return TranscriptionResult(captionID: segment.captionID, text: reply.text,
+            tStart: segment.tStart, tEnd: segment.tEnd, asrModelVersion: reply.modelVersion)
+    }
+}

@@ -8,8 +8,8 @@ extension Color {
         self.init(red: r, green: g, blue: b)
     }
 
-    static let graptionBackground = Color(hex: 0x0B1F3B)
-    static let graptionBubble = Color(hex: 0x1E314A)
-    static let graptionAccent = Color(hex: 0xFF9500)
-    static let graptionSecondaryText = Color(hex: 0x93C5FD)
+    public static let graptionBackground = Color(hex: 0x0B1F3B)
+    public static let graptionBubble = Color(hex: 0x1E314A)
+    public static let graptionAccent = Color(hex: 0xFF9500)
+    public static let graptionSecondaryText = Color(hex: 0x93C5FD)
 }
