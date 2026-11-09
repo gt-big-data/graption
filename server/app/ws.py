@@ -248,18 +248,24 @@ async def session(websocket: WebSocket, session_id: str = Query(min_length=1)) -
             metrics.inference_ms += inference_ms
             caption_id = event.caption_id.root
             del audio, message, event, raw, frame
-            result = ToneResult.model_validate(
-                {
+
+            result_data = {
                     "type": "tone_result",
                     "session_id": session_id,
                     "schema_version": "1.3",
                     "caption_id": caption_id,
                     "tag": prediction.tag,
-                    "probs": prediction.probs,
                     "model_version": prediction.model_version,
                     "latency_ms": {"recv_to_send": (perf_counter() - received_at) * 1000},
-                }
-            )
+            }
+
+            if prediction.probs is not None:
+                result_data["probs"] = prediction.probs
+
+            if prediction.scores is not None:
+                result_data["scores"] = prediction.scores
+
+            result = ToneResult.model_validate(result_data)
             # Keep required tag:null, but omit optional fields absent from the prediction.
             encoded = result.model_dump_json(exclude_unset=True)
             send_started = perf_counter()

@@ -115,7 +115,8 @@ def test_real_faces_fixture():
 
 def test_doc_position_map_matches_code():
     """docs/GRAPTION_CONTEXT.md §6 lists every feature position; keep it in sync."""
-    doc = (make_fixtures.FIXTURE_PATH.parents[3] / "docs/GRAPTION_CONTEXT.md").read_text()
+    doc_path = make_fixtures.FIXTURE_PATH.parents[3] / "docs/GRAPTION_CONTEXT.md"
+    doc = doc_path.read_text(encoding="utf-8")
     assert f"**Feature position map (`{F.FEATURE_SPEC_VERSION}`).**" in doc
     for k, landmark in enumerate(F.LIP_LANDMARKS):
         assert f"| {2 * k}, {2 * k + 1} | {landmark} |" in doc, f"lip point {landmark}"

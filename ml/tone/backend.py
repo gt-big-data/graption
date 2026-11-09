@@ -94,23 +94,52 @@ class AudeeringBackend(ToneBackend):
     """Tone prediction backend using the audEERING model"""
     #constructor for the AudeeringBackend class
     #device-selection code
-    def _select_device(self) -> torch.device:
-        """Select the best available inference device."""
-        # Check if NVIDIA GPU acceleration is available
-        if torch.cuda.is_available():
+    @staticmethod
+    def _select_device(requested_device: str = "auto") -> torch.device:
+        """Select an inference device, either automatically or by explicit request."""
+        requested_device = requested_device.lower()
+
+        if requested_device == "auto":
+            # Check if NVIDIA GPU acceleration is available
+            if torch.cuda.is_available():
+                return torch.device("cuda")
+
+            # Check if Apple's Metal Performance Shaders is available
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                return torch.device("mps")
+
+            # Fall back to CPU
+            return torch.device("cpu")
+
+        if requested_device == "cpu":
+            return torch.device("cpu")
+
+        if requested_device == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError(
+                    "CUDA was requested, but no CUDA-enabled GPU is available."
+                )
             return torch.device("cuda")
 
-        # Check if Apple's Metal Performance Shaders is available
-        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        if requested_device == "mps":
+            if (
+                not hasattr(torch.backends, "mps")
+                or not torch.backends.mps.is_available()
+            ):
+                raise RuntimeError(
+                    "MPS was requested, but Apple GPU support is unavailable."
+                )
             return torch.device("mps")
 
-        # Fall back to CPU
-        return torch.device("cpu")
+        raise ValueError(
+        f"Unsupported device '{requested_device}'. "
+        "Choose from: auto, cpu, cuda, mps."
+    )
 
 
     #Creating the backend loads the model once and multiple audio clips can reuse to save memory
-    def __init__(self) -> None:
-        self.device = self._select_device()
+    def __init__(self, device: str = "auto") -> None:
+        self.device = self._select_device(device)
         self.processor = Wav2Vec2Processor.from_pretrained(MODEL_NAME) #handles formatting
         self.model = EmotionModel.from_pretrained(MODEL_NAME)
         #Moves the model to the selected device
@@ -131,27 +160,36 @@ class AudeeringBackend(ToneBackend):
             sample_rate = 16000
         return audio, sample_rate
 
-    #Internal helper methethod that handles audio conversion
+    def _synchronize_device(self):
+        """Wait for pending GPU operations to finish."""
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
+        elif self.device.type == "mps":
+            torch.mps.synchronize()
+
     def predict(self, audio, sample_rate: int) -> dict:
         audio, sample_rate = self._prepare_audio(audio, sample_rate)
 
-        #Converts audio array into the input representation expected by Wav2Vec2
-        inputs = self.processor (
+        # Convert audio into the input representation expected by Wav2Vec2
+        inputs = self.processor(
             audio,
             sampling_rate=sample_rate,
             return_tensors="pt",
             padding=True,
         )
 
-        #Move input tensor to the same device as the model; else device mismatch error
+        # Move input tensor to the same device as the model
         input_values = inputs.input_values.to(self.device)
 
-        #Measure the model's inference time
+        # Synchronize before timing
+        self._synchronize_device()
         start = time.perf_counter()
 
-        #we disregard hidden features and only retain scores
         with torch.inference_mode():
             _, outputs = self.model(input_values)
+
+        # Synchronize after inference
+        self._synchronize_device()
         latency_ms = (time.perf_counter() - start) * 1000
 
         arousal, dominance, valence = outputs[0].tolist()
@@ -165,7 +203,6 @@ class AudeeringBackend(ToneBackend):
             "model_version": MODEL_NAME,
             "latency_ms": latency_ms,
         }
-
 #NN head used by the audEERING model
 #outputs three values: arousal, dominance, and valence
 class RegressionHead(nn.Module):

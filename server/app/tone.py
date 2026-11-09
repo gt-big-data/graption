@@ -10,8 +10,10 @@ EMOTIONS = ("anger", "disgust", "fear", "happy", "neutral", "sad")
 @dataclass(frozen=True)
 class TonePrediction:
     tag: str | None
-    probs: dict[str, float]
+    probs: dict[str, float]  | None
     model_version: str
+    scores: dict[str, float] | None = None
+
 
 
 class ToneBackend(Protocol):
@@ -31,8 +33,13 @@ class MockToneBackend:
     model_version = "tone-stub-v1"
 
     async def predict(self, audio: bytes, sample_rate: int) -> TonePrediction:
-        return TonePrediction(tag=None, probs=no_probs(), model_version=self.model_version)
-
+        # Zero probabilities signal that this stub made no prediction.
+        return TonePrediction(
+            tag=None,
+            probs= no_probs(),
+            scores = None,
+            model_version=self.model_version,
+        )
 
 @dataclass(frozen=True)
 class AudeeringThresholds:
