@@ -33,6 +33,8 @@ struct ContentView: View {
     @State private var isReady = false
     @State private var status = "Loading base.en…"
     @State private var setupFailed = false
+    @State private var toneCaptionIDs: Set<UUID> = []
+    @State private var toneTags: [UUID: String] = [:]
     @State private var captions: [CaptionEntry] = []
     /// Captions whose on-screen time is up. They leave the camera view but stay in the transcript.
     @State private var expiredCaptionIDs: Set<UUID> = []
@@ -48,7 +50,7 @@ struct ContentView: View {
         Array(captions.filter { !expiredCaptionIDs.contains($0.id) }.prefix(3))
             .reversed()
             .map { entry in
-                LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text)
+                LiveCaption(id: entry.id, speakerName: "Someone", toneTag: toneTags[entry.id], text: entry.text)
             }
     }
 
@@ -90,7 +92,7 @@ struct ContentView: View {
                             id: entry.id,
                             speaker: "Someone",
                             text: entry.text,
-                            tone: nil
+                            tone: toneTags[entry.id]
                         )
                     },
                     onHome: {
@@ -160,6 +162,10 @@ struct ContentView: View {
         }
         .task {
             isVisible = true
+            toneMonitor.onToneResult = { id, tag in
+                guard let id = UUID(uuidString: id), toneCaptionIDs.contains(id) else { return }
+                toneTags[id] = tag
+            }
             toneMonitor.start()
             do {
                 // Reuse one capture so calibration survives Stop/Start.
@@ -204,7 +210,12 @@ struct ContentView: View {
         capture.onSegment = { segment in
             guard isVisible else { return }
             pendingCaptions += 1
+            toneCaptionIDs.insert(segment.captionID)
             pipeline.enqueue(segment)
+            Task {
+                await toneMonitor.send(captionID: segment.captionID.uuidString,
+                    tStart: segment.tStart, tEnd: segment.tEnd, samples: segment.samples)
+            }
         }
         capture.onError = { error in
             if isCalibrating {
@@ -295,6 +306,8 @@ struct ContentView: View {
         pipeline.reset()
         soundAlertModel.clear()
         captions.removeAll()
+        toneTags.removeAll()
+        toneCaptionIDs.removeAll()
         expiredCaptionIDs.removeAll()
         do {
             try capture.start(calibrating: true)
