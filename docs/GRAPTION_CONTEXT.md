@@ -517,6 +517,11 @@ for caption [t0, t1]:
 **Data**
 - **CREMA-D** (free): about 7.4k clips, 91 actors, 12 sentences, 6 emotions (anger, disgust, fear, happy, neutral, sad).
 - **Split by actor**, 70/15/15, fixed seed.
+- A10 implementation: `ml/tone/make_splits.py`, seed 42, produces 63/14/14 actors
+  (the nearest whole-actor allocation). Using CREMA-D's `VideoDemographics.csv`,
+  validation and test each contain 7 male and 7 female actors; training contains
+  the remaining 34 male and 29 female actors. Actor IDs only are saved in
+  `ml/tone/splits/crema_d_actors.json` under `train`, `val`, and `test`.
 - The dataset is acted, so **team recordings are the real test set**.
 
 **Pipeline (Mac)**
