@@ -6,6 +6,8 @@ import Foundation
 public final class CaptionPipeline {
     public struct Delivery {
         public let result: TranscriptionResult
+        /// The finalized VAD segment that produced `result`.
+        public let segment: AudioSegment
         public let transcriptionSeconds: TimeInterval
         public let receivedAt: ContinuousClock.Instant
     }
@@ -67,6 +69,7 @@ public final class CaptionPipeline {
                 let result = try await transcriber.transcribe(segment)
                 guard session == generation else { continue }
                 onResult?(Delivery(result: result,
+                                   segment: segment,
                                    transcriptionSeconds: Self.seconds(started.duration(to: .now)),
                                    receivedAt: receivedAt))
             } catch {

@@ -1,5 +1,6 @@
 import SwiftUI
 import GraptionAudio
+import GraptionCore
 import GraptionNetwork
 import GraptionUI
 
@@ -11,11 +12,8 @@ struct ContentView: View {
     @State private var showSavedSessions = false
     @State private var transcriptReturnsToLive = false
     @State private var capture: MicrophoneCapture?
-    @StateObject private var toneMonitor = ToneConnectionMonitor(
-        configuration: ToneClientConfiguration.fromAppConfiguration(
-            sessionID: UUID().uuidString
-        )
-    )
+    @StateObject private var toneMonitor: ToneConnectionMonitor
+    @State private var toneClient: ToneClient?
     @State private var soundAlertModel = SoundAlertModel()
     @State private var hasPrintedLabels = false
     @State private var isVisible = false
@@ -37,6 +35,16 @@ struct ContentView: View {
     /// Captions whose on-screen time is up. They leave the camera view but stay in the transcript.
     @State private var expiredCaptionIDs: Set<UUID> = []
     @State private var listenTask: Task<Void, Never>?
+    @State private var toneRequestTask: Task<Void, Never>?
+    @State private var toneGeneration = 0
+    @State private var pendingToneIDs: Set<UUID> = []
+    @State private var deferredExpiryIDs: Set<UUID> = []
+
+    init() {
+        let configuration = ToneClientConfiguration.fromAppConfiguration(sessionID: UUID().uuidString)
+        _toneMonitor = StateObject(wrappedValue: ToneConnectionMonitor(configuration: configuration))
+        _toneClient = State(initialValue: configuration.map { ToneClient(configuration: $0) })
+    }
 
     private var canListen: Bool {
         capture != nil && isReady && !isPreparing && !isCalibrating && !isStarting
@@ -48,7 +56,7 @@ struct ContentView: View {
         Array(captions.filter { !expiredCaptionIDs.contains($0.id) }.prefix(3))
             .reversed()
             .map { entry in
-                LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text)
+                LiveCaption(id: entry.id, speakerName: "Someone", toneTag: entry.toneTag, text: entry.text)
             }
     }
 
@@ -64,8 +72,19 @@ struct ContentView: View {
         let seconds = Self.onScreenSeconds(for: entry.text)
         Task {
             try? await Task.sleep(for: .seconds(seconds))
-            expiredCaptionIDs.insert(id)
+            if pendingToneIDs.contains(id) {
+                deferredExpiryIDs.insert(id)
+                // Bound the wait if the server stops responding.
+                try? await Task.sleep(for: .seconds(30))
+                guard deferredExpiryIDs.remove(id) != nil else { return }
+            }
+            expireCaption(id)
         }
+    }
+
+    private func expireCaption(_ id: UUID) {
+        guard captions.contains(where: { $0.id == id }) else { return }
+        expiredCaptionIDs.insert(id)
     }
 
     private var bannerAlert: GraptionUI.SoundAlert? {
@@ -90,7 +109,7 @@ struct ContentView: View {
                             id: entry.id,
                             speaker: "Someone",
                             text: entry.text,
-                            tone: nil
+                            tone: entry.toneTag
                         )
                     },
                     onHome: {
@@ -181,6 +200,10 @@ struct ContentView: View {
             isVisible = false
             toneMonitor.stop()
             listenTask?.cancel()
+            toneGeneration += 1
+            toneRequestTask?.cancel()
+            toneRequestTask = nil
+            Task { await toneClient?.disconnect() }
             capture?.onSegment = nil
             capture?.onSoundAlert = nil
             capture?.stop()
@@ -256,7 +279,68 @@ struct ContentView: View {
             )
             captions.insert(entry, at: 0)
             scheduleExpiry(of: entry)
+            requestTone(for: delivery.segment)
         }
+    }
+
+    /// Tone is an optional follow-up: caption rendering happens before this work begins.
+    /// Requests are serialized because their WebSocket replies arrive in request order.
+    private func requestTone(for segment: AudioSegment) {
+        guard let toneClient, toneMonitor.state == .connected else { return }
+        let id = segment.captionID
+        pendingToneIDs.insert(id)
+        let generation = toneGeneration
+        let previousRequest = toneRequestTask
+        toneRequestTask = Task {
+            await previousRequest?.value
+            guard !Task.isCancelled, generation == toneGeneration else { return }
+            var tag: String?
+            defer { finishTone(for: id, tag: tag) }
+            guard pendingToneIDs.contains(id) else { return }
+            do {
+                let result = try await toneClient.requestTone(
+                    captionID: segment.captionID.uuidString,
+                    tStart: segment.tStart,
+                    tEnd: segment.tEnd,
+                    sampleRate: 16_000,
+                    pcm16: pcm16Data(from: segment.samples)
+                )
+                guard
+                    !Task.isCancelled, generation == toneGeneration,
+                    let resultCaptionID = result.captionID,
+                    UUID(uuidString: resultCaptionID) == segment.captionID
+                else { return }
+                tag = result.tag
+            } catch {
+                // The tone server is optional; captions must remain live when it is unavailable.
+            }
+        }
+    }
+
+    private func finishTone(for captionID: UUID, tag: String?) {
+        pendingToneIDs.remove(captionID)
+        guard let index = captions.firstIndex(where: { $0.id == captionID }) else { return }
+        captions[index].toneTag = tag
+        guard deferredExpiryIDs.remove(captionID) != nil else { return }
+        if tag == nil {
+            expireCaption(captionID)
+        } else {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                expireCaption(captionID)
+            }
+        }
+    }
+
+    private func pcm16Data(from samples: [Float]) -> Data {
+        var data = Data(capacity: samples.count * MemoryLayout<Int16>.size)
+        for sample in samples {
+            var value = Int16(
+                (min(max(sample.isFinite ? sample : 0, -1), 1) * Float(Int16.max)).rounded()
+            ).littleEndian
+            withUnsafeBytes(of: &value) { data.append(contentsOf: $0) }
+        }
+        return data
     }
 
     private func prepareModel(allowDownload: Bool) async {
@@ -296,6 +380,8 @@ struct ContentView: View {
         soundAlertModel.clear()
         captions.removeAll()
         expiredCaptionIDs.removeAll()
+        pendingToneIDs.removeAll()
+        deferredExpiryIDs.removeAll()
         do {
             try capture.start(calibrating: true)
         } catch {
@@ -431,6 +517,7 @@ private struct CaptionEntry: Identifiable {
     let result: TranscriptionResult
     let text: String
     let transcriptionSeconds: TimeInterval
+    var toneTag: String? = nil
     var id: UUID { result.captionID }
 }
 
