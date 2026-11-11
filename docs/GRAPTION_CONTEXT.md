@@ -272,7 +272,7 @@ Must match `ml/common/features.py` exactly: same order, same normalization. `Fea
 | 0–79 | Lip landmarks | 80 | MediaPipe `FACEMESH_LIPS` indices (40 pts, sorted ascending) × (x, y), interleaved x0, y0, x1, y1, …. Converted to pixels (x·width, y·height, so aspect ratio doesn't matter), minus the nose tip (landmark 1), divided by the inter-ocular distance (iris centers 468 and 473, so the 478-point mesh is required) |
 | 80–91 | Mouth blendshapes | 12 | `jawOpen, mouthClose, mouthFunnel, mouthPucker, mouthLowerDownLeft, mouthLowerDownRight, mouthUpperUpLeft, mouthUpperUpRight, mouthStretchLeft, mouthStretchRight, mouthRollLower, mouthRollUpper`, looked up by category name |
 | 92–94 | Head pose | 3 | yaw, pitch, roll (radians) from the transformation matrix's rotation, R = Ry(yaw)·Rx(pitch)·Rz(roll): yaw = atan2(r02, r22), pitch = asin(−r12), roll = atan2(r10, r11), indices row-major |
-| 95 | Loudness | 1 | RMS dBFS of mic audio over the frame's ~67 ms, minus the session's rolling 30s median. Computed by the audio side and passed in (not yet implemented on either side) |
+| 95 | Loudness | 1 | RMS dBFS of the last 1/15 s of mic audio, minus the median of the past 30 s. Past audio only. Exact rule under **Loudness** below; computed by the audio side (`LoudnessTracker` in `features.py`, `LoudnessMeter` in GraptionAudio) and passed in |
 | | **Total** | **96** | Plus a per-face ring buffer of the last 15 frames, giving model input `[1, 15, 96]` |
 
 Math is float64 on both sides; the phone hands Core ML float32. The vectors aren't computed in the live app yet (no SpeakerModel or loudness to consume them); `FeatureHistories.update(with:frameSize:loudness:)` is the per-frame entry point when they are.
@@ -299,6 +299,16 @@ Math is float64 on both sides; the phone hands Core ML float32. The vectors aren
 - **Head pose, positions 92–94 (radians):** 92 yaw, 93 pitch, 94 roll.
 - **Loudness, position 95.**
 - **Other fixed numbers:** window 15 frames at 15 fps (`[1, 15, 96]`); missing landmarks held at most 2 frames; face crop 2.2× the face, resized to 256×256; Python/Swift parity tolerance 1e-6 (float32) and 1e-12 (float64).
+
+**Loudness** (position 95; `ml/common/features.py` `LoudnessTracker`, `GraptionAudio/Loudness.swift` `LoudnessMeter`)
+- Input: the 16 kHz mono float32 mic stream (the phone's converted stream; AVA's extracted 16 kHz audio in training).
+- **Blocks:** back-to-back blocks of 1/15 s. Block *k* is samples `k·16000 // 15` up to (not including) `(k+1)·16000 // 15`, so sizes alternate 1066/1067 and there are exactly 15 per second, with no drift.
+- **Level:** each block's RMS in dBFS (full scale 1.0), `20·log10(rms)`. RMS ≤ 1e-5 (digital silence) is floored at −100 dB instead of −∞.
+- **Loudness:** the block's level minus the **median** level of the last 30 s of blocks (450, including this one). In the first 30 s it uses however many blocks exist; the very first block is therefore 0.
+- **Per frame:** a camera frame at time *t* uses the newest block that **ended at or before *t***. That is only past audio, as on the phone: future audio never changes an earlier frame. Before the first block ends, loudness is 0. In training (AVA at 15 fps), frame *k* at *k*/15 s uses block *k*−1, the 1/15 s just before it.
+- Times are seconds from the audio stream's first sample (Python), or session time (phone: stream start + samples/16000). On the phone, a gap in the audio (capture restarted after an error) starts loudness over, since the block grid no longer lines up.
+- Math is float64 over float32 samples, summed in order. `LoudnessTests` (GraptionAudio, run on the simulator with `xcodebuild test`) reproduces every value in `ml/common/fixtures/loudness_v1.json`: 34 s of generated audio (an integer noise generator, so both sides make identical samples) covering quiet, loud, silence, and more than 30 s. Python and Swift agree to within 1e-9 dB.
+- The live app doesn't build feature vectors yet. When it does, create one `LoudnessMeter`, pass it to `MicrophoneCapture(…, loudnessMeter:)`, and call `meter.loudness(at: frameTime)` for `FeatureHistories.update(…, loudness:)`.
 
 **Missing landmarks** (`FeatureHistory`, same rule in `features.py`; training uses it via `windows_from_track`)
 - A frame counts as *missing* when a tracked face has no landmarks (a coasting face or a MediaPipe miss), no blendshapes/matrix, or a mesh the builder rejects (fewer than 478 points, zero inter-ocular distance, a blendshape absent).

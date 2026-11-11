@@ -2,7 +2,8 @@
 
 Spec: docs/GRAPTION_CONTEXT.md §6 (FeatureBuilder) and §8. The iOS mirror is
 apps/ios/Packages/GraptionVision/Sources/GraptionVision/FeatureBuilder.swift and must produce
-the same numbers; `make_fixtures.py` writes the shared test cases to `fixtures/`.
+the same numbers; `make_fixtures.py` writes the shared test cases to `fixtures/`. Loudness
+(position 95) is mirrored by apps/ios/Packages/GraptionAudio/Sources/GraptionAudio/Loudness.swift.
 
 Changing anything here (order, indices, normalization, the missing-landmarks rule) invalidates
 every trained speaker model. Bump FEATURE_SPEC_VERSION, regenerate the fixtures, update the
@@ -12,11 +13,13 @@ Vector layout (96 values), locked:
     [0:80]   lips        40 landmarks x (x, y), minus nose tip, / inter-ocular distance
     [80:92]  blendshapes 12 mouth scores, in BLENDSHAPE_NAMES order
     [92:95]  head pose   yaw, pitch, roll (radians) from the facial transformation matrix
-    [95]     loudness    frame RMS dBFS minus the session's rolling 30 s median (computed by
-                         the audio side and passed in)
+    [95]     loudness    RMS dBFS of the last 1/15 s of mic audio minus the median of the
+                         past 30 s (LoudnessTracker; computed from audio, passed in per frame)
 """
 
+import bisect
 import math
+import statistics
 from collections import deque
 from collections.abc import Mapping, Sequence
 
@@ -244,4 +247,71 @@ def windows_from_track(frames: Sequence):
     for face_features, loudness in frames:
         history.push(face_features, loudness)
         out.append(history.window())
+    return out
+
+
+# --- Loudness (position 95) ---------------------------------------------------------------
+# Audio is 16 kHz mono, cut into back-to-back blocks of 1/15 s: block k is samples
+# [k * 16000 // 15, (k + 1) * 16000 // 15), so exactly 15 blocks per second with no drift.
+# A block's loudness is its RMS in dBFS minus the median dBFS of the last 30 s of blocks
+# (450, including itself; fewer at session start). A camera frame at time t uses the newest
+# block that ended at or before t: past audio only, as on the phone. Times are seconds from
+# the first audio sample. Math is float64 over the float32 samples, summed in order.
+LOUDNESS_SAMPLE_RATE = 16_000
+LOUDNESS_BLOCKS_PER_SECOND = 15
+LOUDNESS_HISTORY_BLOCKS = 30 * LOUDNESS_BLOCKS_PER_SECOND  # 450
+# Digital silence would be -inf dB; floor the level instead (RMS 1e-5).
+LOUDNESS_FLOOR_DBFS = -100.0
+LOUDNESS_FLOOR_RMS = 1e-5
+
+
+def loudness_block_end(index):
+    """First sample after block `index` (exclusive end)."""
+    return (index + 1) * LOUDNESS_SAMPLE_RATE // LOUDNESS_BLOCKS_PER_SECOND
+
+
+def rms_dbfs(samples):
+    """RMS level in dB relative to full scale (1.0), floored at LOUDNESS_FLOOR_DBFS."""
+    total = 0.0
+    for sample in samples:
+        total += float(sample) * float(sample)
+    rms = math.sqrt(total / len(samples))
+    if rms <= LOUDNESS_FLOOR_RMS:
+        return LOUDNESS_FLOOR_DBFS
+    return 20.0 * math.log10(rms)
+
+
+class LoudnessTracker:
+    """Streaming loudness. `push` audio in any chunk sizes; get one value per finished block."""
+
+    def __init__(self):
+        self._levels = deque(maxlen=LOUDNESS_HISTORY_BLOCKS)
+        self._pending = []
+        self._block = 0
+
+    def push(self, samples):
+        """Returns [(end_time_seconds, loudness)] for each block these samples finished."""
+        finished = []
+        self._pending.extend(float(sample) for sample in samples)
+        while True:
+            start = loudness_block_end(self._block - 1) if self._block else 0
+            size = loudness_block_end(self._block) - start
+            if len(self._pending) < size:
+                return finished
+            level = rms_dbfs(self._pending[:size])
+            del self._pending[:size]
+            self._levels.append(level)
+            end_time = loudness_block_end(self._block) / LOUDNESS_SAMPLE_RATE
+            finished.append((end_time, level - statistics.median(self._levels)))
+            self._block += 1
+
+
+def loudness_for_frames(samples, frame_times):
+    """Offline (training): position 95 for each frame time, 0.0 before the first block ends."""
+    blocks = LoudnessTracker().push(samples)
+    ends = [end for end, _ in blocks]
+    out = []
+    for t in frame_times:
+        index = bisect.bisect_right(ends, t) - 1
+        out.append(blocks[index][1] if index >= 0 else 0.0)
     return out

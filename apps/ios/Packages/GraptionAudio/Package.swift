@@ -30,7 +30,10 @@ let package = Package(
         ),
         .testTarget(
             name: "GraptionAudioTests",
-            dependencies: ["GraptionAudio"]
+            dependencies: ["GraptionAudio"],
+            // Symlinks to ml/common/fixtures/: bundled because the simulator
+            // can't read the repo directly (macOS privacy protection).
+            resources: [.copy("Fixtures")]
         )
     ]
 )

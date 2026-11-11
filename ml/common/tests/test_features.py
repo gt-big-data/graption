@@ -124,3 +124,46 @@ def test_doc_position_map_matches_code():
         assert f"{80 + i} `{name}`" in doc, name
     assert "92 yaw, 93 pitch, 94 roll" in doc
     assert "nose tip = **1**" in doc and "**468** and **473**" in doc
+
+
+def test_committed_loudness_fixture_is_current():
+    """Fails if loudness code changed without `uv run python ml/common/make_fixtures.py`."""
+    committed = json.loads(make_fixtures.LOUDNESS_FIXTURE_PATH.read_text())
+    _assert_close(json.loads(make_fixtures.render_loudness()), committed)
+
+
+def test_loudness_blocks_are_exactly_15_per_second():
+    ends = [F.loudness_block_end(k) for k in range(15 * 60)]
+    assert ends[14] == 16_000 and ends[-1] == 60 * 16_000
+    sizes = {b - a for a, b in zip([0, *ends], ends, strict=False)}
+    assert sizes == {1066, 1067}
+
+
+def test_loudness_floor_and_level():
+    assert F.rms_dbfs([0.0] * 1066) == F.LOUDNESS_FLOOR_DBFS
+    assert F.rms_dbfs([0.5, -0.5]) == pytest.approx(-6.0206, abs=1e-4)
+
+
+def test_loudness_is_relative_to_running_median():
+    quiet, loud = [0.01] * 1066, [0.1] * 1067
+    blocks = F.LoudnessTracker().push(quiet + loud)
+    assert blocks[0][1] == 0.0  # a block alone is its own median
+    assert blocks[1][1] == pytest.approx(10.0)  # 20 dB louder, median of the two is halfway
+
+
+def test_loudness_uses_only_past_audio():
+    samples = make_fixtures.loudness_samples()
+    times = [k / 15 for k in range(150)]
+    before = F.loudness_for_frames(samples[:160_000], times)
+    after = F.loudness_for_frames(samples[:160_000] + [0.9] * 32_000, times)
+    assert before == after  # later audio never changes earlier frames
+
+
+def test_loudness_median_covers_only_30_seconds():
+    # 30 s of loud audio, then quiet: after another 30 s the loud blocks have aged out, so a
+    # quiet block is back at its own median.
+    loud, quiet = [0.5] * (30 * 16_000), [0.01] * (31 * 16_000)
+    blocks = F.LoudnessTracker().push(loud + quiet)
+    assert blocks[449][1] == 0.0
+    assert blocks[460][1] == pytest.approx(-33.98, abs=0.01)  # quiet vs a loud median
+    assert blocks[-1][1] == pytest.approx(0.0, abs=1e-9)
