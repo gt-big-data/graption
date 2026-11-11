@@ -1,8 +1,8 @@
 import Combine
 import Foundation
 
-/// App-facing P4 connection state. It sends one harmless PCM16 test segment after connecting,
-/// then pings an idle server and retries quietly after failures.
+/// App-facing tone connection. Receives delayed tags independently of caption rendering
+/// and retries quietly after failures.
 @MainActor
 public final class ToneConnectionMonitor: ObservableObject {
     public enum State: Equatable, Sendable {
@@ -22,6 +22,23 @@ public final class ToneConnectionMonitor: ObservableObject {
     }
 
     @Published public private(set) var state: State = .disabled
+
+    public var onToneResult: ((String, String?) -> Void)?
+
+    /// Drops audio while disconnected; never queues or stores recordings.
+    public func send(captionID: String, tStart: Double, tEnd: Double, samples: [Float]) async {
+        guard state == .connected, let client else { return }
+        var pcm = Data(capacity: samples.count * 2)
+        for sample in samples {
+            let finite = sample.isFinite ? Double(sample) : 0
+            let value = Int16(max(-32768, min(32767, (finite * 32768).rounded())))
+            let bits = UInt16(bitPattern: value)
+            pcm.append(UInt8(bits & 255))
+            pcm.append(UInt8(bits >> 8))
+        }
+        try? await client.sendToneRequest(captionID: captionID, tStart: tStart,
+            tEnd: tEnd, sampleRate: 16_000, pcm16: pcm)
+    }
 
     private let client: ToneClient?
     private var monitorTask: Task<Void, Never>?
@@ -60,8 +77,10 @@ public final class ToneConnectionMonitor: ObservableObject {
                 state = .connected
 
                 while !Task.isCancelled {
-                    try await Task.sleep(for: ToneClient.reconnectDelay)
-                    try await client.ping()
+                    let reply = try await client.receiveNext()
+                    if case .toneResult(let event) = reply, let id = event.captionID {
+                        onToneResult?(id, event.tag)
+                    }
                 }
             } catch is CancellationError {
                 break
