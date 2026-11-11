@@ -10,7 +10,42 @@ The custom model must match or outperform the audEERING baseline before replacin
 Audio data and model weights are not going to be committed to Git.
 Added project dependencies using uv add --package graption-ml <package>
 
-## Audio Filename Format
+## CREMA-D download and actor splits (A10)
+
+From the repository root, download all 7,442 clips (including IEO at all available
+intensities) into the gitignored `data/crema-d/` folder:
+
+```bash
+uv run python scripts/fetch_crema_d.py --actors 91
+```
+
+Upload this folder to the team's shared Google Drive. The exact shared folder link
+is pending upload completion; keep the local copy for training. Do not commit audio
+or demographic data.
+
+Download the official actor metadata and generate the actor split JSON:
+
+```bash
+curl --fail --location \
+  https://raw.githubusercontent.com/CheyneyComputerScience/CREMA-D/master/VideoDemographics.csv \
+  --output data/VideoDemographics.csv
+uv run python ml/tone/make_splits.py
+```
+
+The default seed is 42. The script writes `ml/tone/splits/crema_d_actors.json`
+with integer actor IDs under `train`, `val`, and `test`. Every clip from an actor
+must use that actor's group; the script does not move or copy audio.
+
+Since 91 actors cannot divide into exact 70/15/15 percentages, the split uses
+63/14/14 actors (approximately 69.2/15.4/15.4%). Validation and test each have
+7 male and 7 female actors, using the metadata's `Sex` field. Training has the
+remaining 34 male and 29 female actors. CSV row order does not affect the result.
+
+Options: `--demographics PATH`, `--seed INTEGER`, and `--out PATH`.
+Keep seed 42 when reproducing the committed split. Changing the split requires
+regenerating downstream embeddings and retraining/evaluating affected models.
+
+## Team recording filename format
 Audio filenames must follow the label_speaker_NN convention, where:
 - label is the intended tone category
 - speaker identifies the speaker
