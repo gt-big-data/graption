@@ -7,9 +7,8 @@ import shutil
 from collections import defaultdict
 from pathlib import Path
 
-
 #Map CREMA-D emotion codes to Graption's human labels.
-EMOTION_LABELS = { 
+EMOTION_LABELS = {
     "HAP": "excited",
     "ANG": "upset",
     "NEU": "neutral",
@@ -85,7 +84,7 @@ def select_recordings (
             candidates = []
 
             #Gather recordings belonging to actors in this group.
-            for actor_id in sorted(actors): 
+            for actor_id in sorted(actors):
                 candidates.extend(actor_files[actor_id][emotion])
 
             #Shuffle candidates so that selection isn't based on filename order

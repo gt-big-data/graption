@@ -109,7 +109,7 @@ def load_results(path: Path, labels: dict[str, str]) -> dict:
                 raise ValueError(
                     f"No human label found for {filename}"
                 )
-            
+
             #Match the audio clip to its human-assigned label
             human_label = labels[filename]
             #Make sure the human label is one of the four

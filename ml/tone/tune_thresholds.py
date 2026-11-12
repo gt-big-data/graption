@@ -3,8 +3,8 @@
 # Path handles file paths across operating systems.
 import argparse
 import csv
-from pathlib import Path
 from itertools import product
+from pathlib import Path
 
 # Import the current thresholds for comparison with tuned thresholds.
 from ml.tone.backend import (
@@ -16,7 +16,6 @@ from ml.tone.backend import (
     UPSET_AROUSAL_THRESHOLD,
     UPSET_VALENCE_THRESHOLD,
 )
-
 
 # Split by speaker so recordings from the same person
 # never appear in both tuning and held-out evaluation.
@@ -219,7 +218,7 @@ def search_tag_thresholds(dataset: list[dict], tag: str, base_thresholds: dict) 
         thresholds = base_thresholds.copy()
         thresholds.update(candidate)
 
-        #Apply the actual classifier, including its rule priority  
+        #Apply the actual classifier, including its rule priority
         predicted = [
             clip for clip in dataset
             if predict_tag(
@@ -242,8 +241,6 @@ def search_tag_thresholds(dataset: list[dict], tag: str, base_thresholds: dict) 
         #Precision = correct predictions / all predictions.
         #Coverage = percentage of the dataset receiving this tag
         precision = correct / len(predicted)
-        coverage = len(predicted) / len(dataset)
-
         #Only consider combinations that meet our minimum precision goal
         #Among those, prefer the combination that identifies the most clips
         if precision >= MIN_PRECISION and (
@@ -425,7 +422,7 @@ def main() -> None:
 
     #Report tuning performance before evaluating unseen speakers.
     print_metrics(tuning_metrics, "Tuned Thresholds: Tuning")
-    
+
     # Evaluate the existing thresholds on the held-out speakers.
     current_metrics = evaluate_thresholds(
         held_out_dataset,
