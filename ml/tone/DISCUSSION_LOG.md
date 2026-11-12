@@ -215,3 +215,181 @@ The tuned thresholds correctly classified 20 / 28 recordings. The model performe
 
 ## Inference Latency
 According to the 28 recordings, inference latency ranged from approximately 451.10 ms to 889.41 ms, with an average of approximately 655.03 ms per clip.
+
+
+## A7: Tone Threshold Tuning and Evaluation
+
+### Goal
+Evaluate if the audEERING model's arousal and valence scores could reliably distinguish the project'st one tags: excited, upset, calm, and none.
+
+Object: use data-driven threshold selection to maximize the number of recordings assigned each tone tag while attempting to maintain 80% precision. Thresholds were selected using one group of speakers and evaluated on a separate held-out group to determien whether the results generalized to unseen speakers.
+
+Both precision and coverage were considered:
+- Precision: how often a predicted tag is correct
+- Coverage: the percentage of recordings assigned that tag
+
+Goal: prioritize reliable predictions over assigning a tag to every recording. A wrogn emotion tag is worse than returning no tag.
+
+## A5.1 Score Visualization
+A5.1 test set contained 56 recordings across four intended labels: calm, excited, neutral, and upset.
+
+ml/tone/plot_scores.py was used to visualize arousal against valence with recordings colored by their human-assigned labels and current production threshold boundaries displayed
+
+The plot showed overlap between emotion categories, particularly between calm and neutral which suggests that fixed arousal and valence boundaries might not reliably distinguish all intended tone categories.
+
+Plot: ml/tone/a5_1_score_plot.png
+
+## CREMA-D Dataset
+To exapdn evaluation beyond the 56 clips from A5.1, I selected 300 CREMA-D recordings.
+
+The selected data subset contains:
+- 100 recordings mapped to excited (happy).
+- 100 recordings mapped to upset (anger).
+- 100 recordings mapped to neutral (neutral).
+
+The recordings were divided into two groups based on actor identity:
+- Tuning set: 150 recordings
+- Held-out set: 150 recordings
+
+The split used separate actor group to reduce the possibility that the same speakers would appear in both threshold selection and evaluation. The selected recordings represented 85 unique actors.
+
+The CREMA-D labels were mapped to the project's tone categories:
+- Happy --> excited
+- Anger --> upset
+- Neutral --> none
+
+## CREMA-D Score Visualization
+The CREMA-D results were plotted using ml/tone/plot_scores.py
+
+The visualization showed overlap between the three emotion categories. Excited recordings were generally more concentrated towards higher arousal and positive valence, while neutral recordings were more concentrated toward lower arousal. However, neither pattern was consistern enough to completely separate the categories. Upset was particularly spread across the arousal and valence dimensions, with some appearing in regions also occupied by excited and neutral recordings.
+
+Plot: ml/tone/crema_d_score_plot.png
+
+## Threshold Search Methodology
+ml/tone/tune_thresholds.py was implemented to systematically search combinations of arousal and valence thresholds.
+
+Search tested candidate values from 0.05 to 0.95 in increments of 0.02.
+
+The threshold rules were evaluated using the classifier's actual prediction logic, including the priority order of excited, upset, and calm. This ensured that the search accounted for how one tag's thresholds could affect prediction for another tag.
+
+For each predicted tag:
+- Precision = correct predictions / total predictiosn receiving that tag.
+- Coverage = recordings receiving that tag / total recordings.
+
+The search prioritized the threshold combination with the highest coverage while maintaining at least 80% precision on the tuning set.
+
+If no threshold combination met the precision requirement, the existing thresholds were retained for that tag.
+
+## Selected Thresholds
+- Excited: Arousal = 0.43 and Valence = 0.51
+- Upset: Arousal = 0.41 and Valence = 0.37
+- Calm: No combination met the 80% requirement
+
+The excited and upset thresholds met the minimum precision requirement on the tuning set. However, no qualifying calm threshold combination was found.
+
+## Tuning Set Results
+The selected thresholds were evaluated on the same 150 recordings used for threshold selection.
+1. Excited
+    - Predicted: 11
+    - Correct: 9
+    - Precision: 81.8%
+    - Coverage: 7.3%
+2. Upset
+    - Predicted: 35
+    - Correct: 28
+    - Precision: 80.0%
+    - Coverage: 23.3%
+3. Calm
+    - Predicted: 6
+    - Correct: 0
+    - Precision: 0%
+    - Coverage: 4%
+4. Untagged
+    - Predicted: 98
+    - Correct: 46
+    - Precision: 46.9%
+    - Coverage: 65.3%
+
+Excited and upset reached the 80% precision requirement on the tuning set. However, their coverage was limited. Only 11 of 150 recordings received an excited tag, while 35 received an upset tag.
+
+The calm results reflect the existing calm thresholds, which were retained because no qualifying alternative was found. None of the six recordings assigned calm was actually labeled calm.
+
+These results demonstrate the tradeoff between precision and coverage. Even when the search achieved the desired precision for excited and upset, it could only confidently assign those tags to a portion of the recordings.
+
+## Held-Out Results
+The existing production thresholds and newly selected thresholds were evaluated on the same 150 held-out recordings
+
+Current production thresholds:
+1. Excited
+    - Predicted: 11
+    - Correct: 4
+    - Precision: 36.4%
+    - Coverage: 7.3%
+2. Upset
+    - Predicted: 30
+    - Correct: 19
+    - Precision: 63.3%
+    - Coverage: 20.0%
+3. Calm
+    - Predicted: 7
+    - Correct: 0
+    - Precision: 0%
+    - Coverage: 4.7%
+4. Untagged
+    - Predicted: 102
+    - Correct: 48
+    - Precision: 47.1%
+    - Coverage: 68.0%
+
+Tuned thresholds:
+1. Excited
+    - Predicted: 13
+    - Correct: 8
+    - Precision: 61.5%
+    - Coverage: 8.7%
+2. Upset
+    - Predicted: 27
+    - Correct: 17
+    - Precision: 63.0%
+    - Coverage: 18.0%
+3. Calm
+    - Predicted: 6
+    - Correct: 0
+    - Precision: 0%
+    - Coverage: 4.0%
+4. Untagged
+    - Predicted: 104
+    - Correct: 47
+    - Precision: 45.2%
+    - Coverage: 69.3%
+
+Although the tuned thresholds improved excited precision compared with the existing production thresholds, neither excited nor upset maintained the required 80% precision on the held-out recordings.
+
+Excited precision decreased from 81.8% on the tuning set to 61.5% on held-out data. Upset precision decreased from 80.0% to 63.0%.
+
+Calm remained unreliable, with zero correct predictions among the six held-out recordings receiving that tag.
+
+Coverage also remained limited. The tuned classifier assigned excited to 8.7% of held-out recordings and upset to 18.0%. Most recordings remained untagged.
+
+## Findings and Discussion
+The results indicate that the threshold combinations selected using one group of speakers did not generalize reliably to unseen speakers.
+
+Although the search identified excited and upset thresholds that met the 80% precision requirement on the tuning set, their held-out precision fell below the target. This suggests that the relationship between arousal, valence, and the intended emotion labels varies across speakers.
+
+The experiment also revealed a precision and coverage tradeoff. The search was designed to maximize coverage while maintaining at least 80% precision. However, even on the tuning set, only 7.3% of recordings received an excited tag and 23.3% received an upset tag. On held-out data, neither tag maintained the required precision.
+
+This means the classifier faces two limitations:
+
+It cannot consistently maintain the desired precision on unseen speakers.
+
+It assigns tags to a relatively small proportion of recordings when prioritizing prediction reliability.
+
+The score visualizations also showed substantial overlap between the emotion categories. This limits how reliably a classifier based only on fixed arousal and valence boundaries can distinguish the intended tags.
+
+## Recommendations
+
+Excited and upset: Do not replace the existing production thresholds with the experimental thresholds at this stage. Although the experimental thresholds improved excited precision on held-out data, neither tag reached the required 80% precision. Their limited coverage also means that many recordings remain untagged. Further evaluation and potentially a different classification approach may be necessary.
+
+Calm: Recommend withholding automatic calm classification pending UI/UX feedback. No threshold combination met the 80% precision requirement on the tuning set, and none of the held-out calm predictions was correct. The overlap between calm and neutral recordings also makes this distinction difficult using arousal and valence alone.
+
+Production thresholds: Keep the existing production threshold constants unchanged because the experimental thresholds did not demonstrate sufficient held-out precision or coverage to justify replacing them.
