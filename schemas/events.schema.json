@@ -153,7 +153,7 @@
     },
     "ToneResult": {
       "type": "object",
-      "description": "Tone server -> phone. tag is null when not confident (a wrong tag is worse than none). Tag vocabulary depends on backend: custom = the 6 emotions minus neutral; audeering baseline = excited | upset | calm.",
+      "description": "Tone server -> phone. tag is null when not confident (a wrong tag is worse than none). Tags shown on screen are excited | upset | calm | null for every backend. Custom 6-emotion model: happy -> excited, anger -> upset (only when its probability is at least TAG_THRESHOLD, default 0.6, and it is the argmax); neutral, sad, fear and disgust -> null; never calm (CREMA-D has no calm clips). audeering baseline: arousal/valence thresholds (docs/GRAPTION_CONTEXT.md section 7).",
       "additionalProperties": false,
       "required": [
         "type", "session_id", "schema_version", "caption_id",
@@ -164,7 +164,7 @@
         "session_id": { "$ref": "#/$defs/SessionId" },
         "schema_version": { "$ref": "#/$defs/SchemaVersion" },
         "caption_id": { "$ref": "#/$defs/CaptionId" },
-        "tag": { "type": ["string", "null"], "examples": ["happy"] },
+        "tag": { "type": ["string", "null"], "examples": ["excited"] },
         "probs": {
           "type": "object",
           "additionalProperties": false,

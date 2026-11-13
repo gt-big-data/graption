@@ -182,7 +182,7 @@ Every event includes `type`, `session_id`, and `schema_version` (currently `"1.3
 
 **Tone server → phone:**
 ```jsonc
-{ "type":"tone_result", "caption_id":"uuid", "tag":"happy"|null,
+{ "type":"tone_result", "caption_id":"uuid", "tag":"excited"|"upset"|"calm"|null,
   "probs":{"anger":0.05,"disgust":0.02,"fear":0.03,"happy":0.72,"neutral":0.15,"sad":0.03},
   "model_version":"tone-head-v2", "latency_ms":{"recv_to_send":180} }
 ```
@@ -272,7 +272,7 @@ Must match `ml/common/features.py` exactly: same order, same normalization. `Fea
 | 0–79 | Lip landmarks | 80 | MediaPipe `FACEMESH_LIPS` indices (40 pts, sorted ascending) × (x, y), interleaved x0, y0, x1, y1, …. Converted to pixels (x·width, y·height, so aspect ratio doesn't matter), minus the nose tip (landmark 1), divided by the inter-ocular distance (iris centers 468 and 473, so the 478-point mesh is required) |
 | 80–91 | Mouth blendshapes | 12 | `jawOpen, mouthClose, mouthFunnel, mouthPucker, mouthLowerDownLeft, mouthLowerDownRight, mouthUpperUpLeft, mouthUpperUpRight, mouthStretchLeft, mouthStretchRight, mouthRollLower, mouthRollUpper`, looked up by category name |
 | 92–94 | Head pose | 3 | yaw, pitch, roll (radians) from the transformation matrix's rotation, R = Ry(yaw)·Rx(pitch)·Rz(roll): yaw = atan2(r02, r22), pitch = asin(−r12), roll = atan2(r10, r11), indices row-major |
-| 95 | Loudness | 1 | RMS dBFS of mic audio over the frame's ~67 ms, minus the session's rolling 30s median. Computed by the audio side and passed in (not yet implemented on either side) |
+| 95 | Loudness | 1 | RMS dBFS of the last 1/15 s of mic audio, minus the median of the past 30 s. Past audio only. Exact rule under **Loudness** below; computed by the audio side (`LoudnessTracker` in `features.py`, `LoudnessMeter` in GraptionAudio) and passed in |
 | | **Total** | **96** | Plus a per-face ring buffer of the last 15 frames, giving model input `[1, 15, 96]` |
 
 Math is float64 on both sides; the phone hands Core ML float32. The vectors aren't computed in the live app yet (no SpeakerModel or loudness to consume them); `FeatureHistories.update(with:frameSize:loudness:)` is the per-frame entry point when they are.
@@ -299,6 +299,16 @@ Math is float64 on both sides; the phone hands Core ML float32. The vectors aren
 - **Head pose, positions 92–94 (radians):** 92 yaw, 93 pitch, 94 roll.
 - **Loudness, position 95.**
 - **Other fixed numbers:** window 15 frames at 15 fps (`[1, 15, 96]`); missing landmarks held at most 2 frames; face crop 2.2× the face, resized to 256×256; Python/Swift parity tolerance 1e-6 (float32) and 1e-12 (float64).
+
+**Loudness** (position 95; `ml/common/features.py` `LoudnessTracker`, `GraptionAudio/Loudness.swift` `LoudnessMeter`)
+- Input: the 16 kHz mono float32 mic stream (the phone's converted stream; AVA's extracted 16 kHz audio in training).
+- **Blocks:** back-to-back blocks of 1/15 s. Block *k* is samples `k·16000 // 15` up to (not including) `(k+1)·16000 // 15`, so sizes alternate 1066/1067 and there are exactly 15 per second, with no drift.
+- **Level:** each block's RMS in dBFS (full scale 1.0), `20·log10(rms)`. RMS ≤ 1e-5 (digital silence) is floored at −100 dB instead of −∞.
+- **Loudness:** the block's level minus the **median** level of the last 30 s of blocks (450, including this one). In the first 30 s it uses however many blocks exist; the very first block is therefore 0.
+- **Per frame:** a camera frame at time *t* uses the newest block that **ended at or before *t***. That is only past audio, as on the phone: future audio never changes an earlier frame. Before the first block ends, loudness is 0. In training (AVA at 15 fps), frame *k* at *k*/15 s uses block *k*−1, the 1/15 s just before it.
+- Times are seconds from the audio stream's first sample (Python), or session time (phone: stream start + samples/16000). On the phone, a gap in the audio (capture restarted after an error) starts loudness over, since the block grid no longer lines up.
+- Math is float64 over float32 samples, summed in order. `LoudnessTests` (GraptionAudio, run on the simulator with `xcodebuild test`) reproduces every value in `ml/common/fixtures/loudness_v1.json` (bundled as a copy, since the simulator cannot read the repo; pytest checks the copy matches): 34 s of generated audio (an integer noise generator, so both sides make identical samples) covering quiet, loud, silence, and more than 30 s. Python and Swift agree to within 1e-9 dB.
+- The live app doesn't build feature vectors yet. When it does, create one `LoudnessMeter`, pass it to `MicrophoneCapture(…, loudnessMeter:)`, and call `meter.loudness(at: frameTime)` for `FeatureHistories.update(…, loudness:)`.
 
 **Missing landmarks** (`FeatureHistory`, same rule in `features.py`; training uses it via `windows_from_track`)
 - A frame counts as *missing* when a tracked face has no landmarks (a coasting face or a MediaPipe miss), no blendshapes/matrix, or a mesh the builder rejects (fewer than 478 points, zero inter-ocular distance, a blendshape absent).
@@ -446,7 +456,7 @@ for caption [t0, t1]:
   2. WavLM-base+ (frozen), `output_hidden_states=True`, giving 13 layers × T × 768.
   3. Learned softmax-weighted sum over the 13 layers, then mean-pool over time, giving a 768-dim vector.
   4. Head: `Linear(768,256) → ReLU → Dropout(0.3) → Linear(256,6) → softmax`.
-  5. Tag mapper: `tag = argmax` if `max prob ≥ 0.6` and the argmax isn't `neutral`; otherwise `null`.
+  5. Tag mapper (`emotion_tag` in `server/app/tone.py`): take the argmax emotion; if its prob is ≥ `TAG_THRESHOLD` (default 0.6), show its tag from the §9 mapping (happy → `excited`, anger → `upset`); every other case is `null`. `probs` always carries all 6 emotions, so logs keep what the model actually guessed.
 - **Week-1 baseline mode** (`TONE_BACKEND=audeering`, implemented): the audEERING model outputs arousal, valence, and dominance in [0,1]. Map them with tunable thresholds (`AudeeringThresholds` in `server/app/tone.py`). These are the values tuned on team recordings in A4 (`ml/tone/DISCUSSION_LOG.md`), replacing the original 0.65/0.55/0.4/0.3 guesses:
   - arousal > 0.64 and valence > 0.45 → `excited`
   - arousal > 0.47 and valence < 0.4 → `upset`
@@ -526,6 +536,18 @@ for caption [t0, t1]:
 4. Metrics: macro-F1 and unweighted accuracy on the test actors, plus agreement with human judgment on team recordings.
 5. **Must beat or match** the audEERING baseline on team recordings (compare on arousal-style tags) before it replaces the baseline.
 6. Export the head weights (`tone-head-vN.pt`) to the Mac. At end of semester, convert to Core ML and move on-device.
+
+**Tags shown on screen** (the app only shows `excited`, `upset`, `calm`, the same words the audEERING baseline uses):
+
+| Emotion | Tag | Why |
+|---|---|---|
+| happy | `excited` | |
+| anger | `upset` | |
+| neutral | `null` | Nothing worth flagging. |
+| sad, fear, disgust | `null` for now | A wrong tag is worse than none. Revisit after testing on team recordings. |
+| (none) | `calm` | No custom-model tag yet: CREMA-D has no calm clips. Only the baseline emits `calm`. |
+
+The mapping is `EMOTION_TAGS` in `server/app/tone.py`, applied by `emotion_tag` (§7 step 5). It is also written in the `tone_result` description in `schemas/events.schema.json`. Change all three together.
 
 **Stretch (only if tests show gaps):** MSP-Podcast (natural speech, needs a GT-signed license) and openSMILE eGeMAPS features concatenated before the head.
 
@@ -641,6 +663,7 @@ If the device is overloaded, degrade in this order:
 - **CREMA-D, not MSP-Podcast; openSMILE dropped:** no license paperwork. The audEERING baseline (trained on MSP-Podcast) gives natural-speech coverage for free. Both remain stretch goals, used only if tests show gaps.
 - **Tone never blocks captions,** and tone tags only show when confident. A wrong tag is worse than none for DHH users.
 - **Recoverable request errors (schema v1.1):** return descriptive `session_error` messages with the received request so manual clients can correct mistakes without reconnecting. Never log or store the echoed payload.
+- **Custom tone tags reuse the baseline's words:** happy → `excited`, anger → `upset`, everything else → `null` (§9), so the UI shows one vocabulary whichever backend runs. Sad, fear and disgust stay hidden until team recordings show they're reliable; `calm` has no CREMA-D training data. Schema text-only change, no version bump.
 - **Rule-based fusion before learned fusion:** it produces the logged data a learned version would need.
 - **Toolchain baseline:** the project uses Xcode 16-compatible format (77), iOS 17+, and
   GraptionCore uses Swift tools 6.0 so it builds with the installed Xcode 26 toolchain.

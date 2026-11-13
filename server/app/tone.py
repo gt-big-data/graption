@@ -6,6 +6,12 @@ from typing import Protocol
 
 EMOTIONS = ("anger", "disgust", "fear", "happy", "neutral", "sad")
 
+# On-screen tag for each custom-model emotion (docs/GRAPTION_CONTEXT.md §9).
+# Unlisted emotions (neutral, sad, fear, disgust) never show a tag: a wrong
+# tag is worse than none. No emotion maps to "calm": CREMA-D has no calm clips.
+EMOTION_TAGS = {"happy": "excited", "anger": "upset"}
+DEFAULT_TAG_THRESHOLD = 0.6
+
 
 @dataclass(frozen=True)
 class TonePrediction:
@@ -69,6 +75,16 @@ def map_tag(
     if t.calm_arousal_low < arousal < t.calm_arousal_high and valence > t.calm_valence:
         return "calm"
     return None
+
+
+def emotion_tag(
+    probs: dict[str, float], threshold: float = DEFAULT_TAG_THRESHOLD
+) -> str | None:
+    """Map custom-model probabilities to a tag; None unless the argmax is confident and shown."""
+    emotion = max(EMOTIONS, key=lambda name: probs[name])
+    if probs[emotion] < threshold:
+        return None
+    return EMOTION_TAGS.get(emotion)
 
 
 def create_backend(name: str | None = None) -> ToneBackend:
