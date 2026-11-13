@@ -182,7 +182,7 @@ Every event includes `type`, `session_id`, and `schema_version` (currently `"1.3
 
 **Tone server → phone:**
 ```jsonc
-{ "type":"tone_result", "caption_id":"uuid", "tag":"happy"|null,
+{ "type":"tone_result", "caption_id":"uuid", "tag":"excited"|"upset"|"calm"|null,
   "probs":{"anger":0.05,"disgust":0.02,"fear":0.03,"happy":0.72,"neutral":0.15,"sad":0.03},
   "model_version":"tone-head-v2", "latency_ms":{"recv_to_send":180} }
 ```
@@ -456,7 +456,7 @@ for caption [t0, t1]:
   2. WavLM-base+ (frozen), `output_hidden_states=True`, giving 13 layers × T × 768.
   3. Learned softmax-weighted sum over the 13 layers, then mean-pool over time, giving a 768-dim vector.
   4. Head: `Linear(768,256) → ReLU → Dropout(0.3) → Linear(256,6) → softmax`.
-  5. Tag mapper: `tag = argmax` if `max prob ≥ 0.6` and the argmax isn't `neutral`; otherwise `null`.
+  5. Tag mapper (`emotion_tag` in `server/app/tone.py`): take the argmax emotion; if its prob is ≥ `TAG_THRESHOLD` (default 0.6), show its tag from the §9 mapping (happy → `excited`, anger → `upset`); every other case is `null`. `probs` always carries all 6 emotions, so logs keep what the model actually guessed.
 - **Week-1 baseline mode** (`TONE_BACKEND=audeering`, implemented): the audEERING model outputs arousal, valence, and dominance in [0,1]. Map them with tunable thresholds (`AudeeringThresholds` in `server/app/tone.py`). These are the values tuned on team recordings in A4 (`ml/tone/DISCUSSION_LOG.md`), replacing the original 0.65/0.55/0.4/0.3 guesses:
   - arousal > 0.64 and valence > 0.45 → `excited`
   - arousal > 0.47 and valence < 0.4 → `upset`
@@ -536,6 +536,18 @@ for caption [t0, t1]:
 4. Metrics: macro-F1 and unweighted accuracy on the test actors, plus agreement with human judgment on team recordings.
 5. **Must beat or match** the audEERING baseline on team recordings (compare on arousal-style tags) before it replaces the baseline.
 6. Export the head weights (`tone-head-vN.pt`) to the Mac. At end of semester, convert to Core ML and move on-device.
+
+**Tags shown on screen** (the app only shows `excited`, `upset`, `calm`, the same words the audEERING baseline uses):
+
+| Emotion | Tag | Why |
+|---|---|---|
+| happy | `excited` | |
+| anger | `upset` | |
+| neutral | `null` | Nothing worth flagging. |
+| sad, fear, disgust | `null` for now | A wrong tag is worse than none. Revisit after testing on team recordings. |
+| (none) | `calm` | No custom-model tag yet: CREMA-D has no calm clips. Only the baseline emits `calm`. |
+
+The mapping is `EMOTION_TAGS` in `server/app/tone.py`, applied by `emotion_tag` (§7 step 5). It is also written in the `tone_result` description in `schemas/events.schema.json`. Change all three together.
 
 **Stretch (only if tests show gaps):** MSP-Podcast (natural speech, needs a GT-signed license) and openSMILE eGeMAPS features concatenated before the head.
 
@@ -651,6 +663,7 @@ If the device is overloaded, degrade in this order:
 - **CREMA-D, not MSP-Podcast; openSMILE dropped:** no license paperwork. The audEERING baseline (trained on MSP-Podcast) gives natural-speech coverage for free. Both remain stretch goals, used only if tests show gaps.
 - **Tone never blocks captions,** and tone tags only show when confident. A wrong tag is worse than none for DHH users.
 - **Recoverable request errors (schema v1.1):** return descriptive `session_error` messages with the received request so manual clients can correct mistakes without reconnecting. Never log or store the echoed payload.
+- **Custom tone tags reuse the baseline's words:** happy → `excited`, anger → `upset`, everything else → `null` (§9), so the UI shows one vocabulary whichever backend runs. Sad, fear and disgust stay hidden until team recordings show they're reliable; `calm` has no CREMA-D training data. Schema text-only change, no version bump.
 - **Rule-based fusion before learned fusion:** it produces the logged data a learned version would need.
 - **Toolchain baseline:** the project uses Xcode 16-compatible format (77), iOS 17+, and
   GraptionCore uses Swift tools 6.0 so it builds with the installed Xcode 26 toolchain.
