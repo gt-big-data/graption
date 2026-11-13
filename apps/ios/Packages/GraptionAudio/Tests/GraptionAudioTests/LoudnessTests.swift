@@ -39,8 +39,8 @@ private struct LoudnessFixture: Decodable {
     let expected_frame_loudness: [Double]
 
     static func load() throws -> LoudnessFixture {
-        // Fixtures/loudness_v1.json is a symlink to ml/common/fixtures/,
-        // bundled so the simulator can read it: one copy of the data.
+        // Fixtures/loudness_v1.json is written by make_fixtures.py next to
+        // ml/common/fixtures/ (pytest checks they match); bundled for the simulator.
         guard let url = Bundle.module.url(
             forResource: "loudness_v1",
             withExtension: "json",

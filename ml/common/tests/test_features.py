@@ -132,6 +132,13 @@ def test_committed_loudness_fixture_is_current():
     _assert_close(json.loads(make_fixtures.render_loudness()), committed)
 
 
+def test_swift_loudness_fixture_copy_matches():
+    """GraptionAudio bundles its own copy; make_fixtures.py writes both."""
+    swift_copy = make_fixtures.LOUDNESS_SWIFT_COPY_PATH
+    assert not swift_copy.is_symlink()
+    assert swift_copy.read_bytes() == make_fixtures.LOUDNESS_FIXTURE_PATH.read_bytes()
+
+
 def test_loudness_blocks_are_exactly_15_per_second():
     ends = [F.loudness_block_end(k) for k in range(15 * 60)]
     assert ends[14] == 16_000 and ends[-1] == 60 * 16_000

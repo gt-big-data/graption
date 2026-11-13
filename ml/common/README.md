@@ -23,7 +23,7 @@ uv run pytest ml/common                    # fails if the fixtures are stale
 swift test --package-path apps/ios/Packages/GraptionVision   # Swift must reproduce them
 ```
 
-Loudness has its own fixture, `fixtures/loudness_v1.json` (same command writes it). GraptionAudio
+Loudness has its own fixture, `fixtures/loudness_v1.json` (same command writes it, plus a byte-identical copy in `apps/ios/Packages/GraptionAudio/Tests/GraptionAudioTests/Fixtures/` that the simulator tests bundle; pytest fails if they differ). GraptionAudio
 is iOS-only, so its `LoudnessTests` run on the simulator (any installed iPhone simulator name):
 
 ```bash

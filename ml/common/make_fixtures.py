@@ -26,6 +26,12 @@ except ImportError:  # run as a plain script
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "features_v1.json"
 LOUDNESS_FIXTURE_PATH = FIXTURE_PATH.parent / "loudness_v1.json"
+# Byte-identical copy bundled into GraptionAudio's tests: the iOS simulator
+# can't read the repo directly (macOS privacy protection on ~/Documents etc.).
+LOUDNESS_SWIFT_COPY_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "apps/ios/Packages/GraptionAudio/Tests/GraptionAudioTests/Fixtures/loudness_v1.json"
+)
 
 # MediaPipe's 52 blendshape categories in model output order (index 0 is "_neutral").
 ALL_BLENDSHAPES = [
@@ -218,5 +224,6 @@ if __name__ == "__main__":
     FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE_PATH.write_text(render())
     print(f"wrote {FIXTURE_PATH}")
-    LOUDNESS_FIXTURE_PATH.write_text(render_loudness())
-    print(f"wrote {LOUDNESS_FIXTURE_PATH}")
+    for path in (LOUDNESS_FIXTURE_PATH, LOUDNESS_SWIFT_COPY_PATH):
+        path.write_text(render_loudness())
+        print(f"wrote {path}")
