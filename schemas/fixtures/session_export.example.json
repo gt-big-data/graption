@@ -1,0 +1,45 @@
+{
+  "export_version": "1",
+  "exported_at": "2026-11-04T16:00:00Z",
+  "app_version": "0.1.0",
+  "sessions": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "started_at": "2026-11-04T14:00:00Z",
+      "duration": 10,
+      "captions": [
+        {
+          "caption_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "text": "I'm excited to start our project!",
+          "speaker_id": "f1",
+          "tone_tag": "happy",
+          "t_start": 0,
+          "t_end": 3.5,
+          "model_versions": {
+            "asr": "fake-asr-v1",
+            "asd": "fake-asd-v1",
+            "tone": "fake-tone-v1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "started_at": "2026-11-04T15:00:00Z",
+      "duration": 8,
+      "captions": [
+        {
+          "caption_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "text": "Let's meet again tomorrow.",
+          "speaker_id": "unknown",
+          "tone_tag": null,
+          "t_start": 1,
+          "t_end": 4,
+          "model_versions": {
+            "asr": "fake-asr-v1"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -377,6 +377,7 @@ for caption [t0, t1]:
 - Lists saved sessions. Each shows its caption log (speaker, text, tone tag) and an AI summary/notes (section 10).
 - Stores caption text, speakers, tags, and timings **on-device only**. Never audio or video.
 - Works offline. Summaries that need a model the device lacks are simply unavailable.
+- Meeting data leaves the phone only when the user taps Export. Exported files follow `schemas/session_export.schema.json` and contain  saved captions and session metadata, never audio or raw events.
 - **Caption persistence implemented (issue #29):** `GraptionCore.SessionRecorder` collects
   caption records and atomically saves a completed session through `SessionStore`.
   `FileSessionStore` uses one versioned JSON file per session in private Application Support

@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gt-big-data/graption/schemas/session_export.schema.json",
+  "title": "GraptionSessionExport",
+  "description": "Graption saved-session export contract v1. Created only when the user taps Export. Contains saved captions and session metadata; no audio or raw events. Duration and caption times are in seconds; caption times are relative to session start.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "export_version",
+    "exported_at",
+    "sessions"
+  ],
+  "properties": {
+    "export_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "exported_at": {
+      "$ref": "#/$defs/Timestamp",
+      "description": "Date and time the export was created."
+    },
+    "app_version": {
+      "type": "string"
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Session"
+      }
+    }
+  },
+  "$defs": {
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 date-time string with a timezone, for example 2026-11-04T15:00:00Z."
+    },
+    "SessionId": {
+      "type": "string",
+      "format": "uuid",
+      "minLength": 1
+    },
+    "Seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "CaptionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "FaceId": {
+      "type": "string",
+      "pattern": "^f[1-9][0-9]*$",
+      "description": "Per-session track id assigned by FaceTracker: f1, f2, ..."
+    },
+    "ModelVersions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asr"
+      ],
+      "properties": {
+        "asr": {
+          "type": "string",
+          "examples": [
+            "whisperkit-base.en"
+          ]
+        },
+        "asd": {
+          "type": "string",
+          "examples": [
+            "asd-v3"
+          ]
+        },
+        "tone": {
+          "type": "string",
+          "examples": [
+            "fake-tone-v1"
+          ]
+        }
+      }
+    },
+    "Caption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caption_id",
+        "text",
+        "speaker_id",
+        "tone_tag",
+        "t_start",
+        "t_end",
+        "model_versions"
+      ],
+      "properties": {
+        "caption_id": {
+          "$ref": "#/$defs/CaptionId"
+        },
+        "text": {
+          "type": "string"
+        },
+        "speaker_id": {
+          "description": "Face id chosen by fusion, or \"unknown\" (off-screen/ambiguous; shown as \"Someone\").",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FaceId"
+            },
+            {
+              "const": "unknown"
+            }
+          ]
+        },
+        "tone_tag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Saved tone label, or null when no tone is available.",
+          "examples": [
+            "excited",
+            null
+          ]
+        },
+        "t_start": {
+          "$ref": "#/$defs/Seconds"
+        },
+        "t_end": {
+          "$ref": "#/$defs/Seconds"
+        },
+        "model_versions": {
+          "$ref": "#/$defs/ModelVersions"
+        }
+      }
+    },
+    "Session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "started_at",
+        "duration",
+        "captions"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "started_at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Date and time the session started. The exporter must convert P8's saved startedAt Date to an RFC 3339 date-time string with a timezone."
+        },
+        "duration": {
+          "$ref": "#/$defs/Seconds",
+          "description": "Session duration in seconds."
+        },
+        "captions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Caption"
+          }
+        }
+      }
+    }
+  }
+}
