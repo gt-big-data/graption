@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import GraptionCore
 
 /// App-facing tone connection. Receives delayed tags independently of caption rendering
 /// and retries quietly after failures.
@@ -22,6 +23,10 @@ public final class ToneConnectionMonitor: ObservableObject {
     }
 
     @Published public private(set) var state: State = .disabled
+
+    public private(set) var latestModelVersion: String?
+
+    public var onToneDetails: ((Events) -> Void)?
 
     public var onToneResult: ((String, String?) -> Void)?
 
@@ -79,6 +84,8 @@ public final class ToneConnectionMonitor: ObservableObject {
                 while !Task.isCancelled {
                     let reply = try await client.receiveNext()
                     if case .toneResult(let event) = reply, let id = event.captionID {
+                        latestModelVersion = event.modelVersion
+                        onToneDetails?(event)
                         onToneResult?(id, event.tag)
                     }
                 }

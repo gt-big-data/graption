@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/gt-big-data/graption/schemas/session_export.schema.json",
   "title": "GraptionSessionExport",
-  "description": "Graption saved-session export contract v1. Created only when the user taps Export. Contains saved captions and session metadata; no audio or raw events. Duration and caption times are in seconds; caption times are relative to session start.",
+  "description": "Graption meeting export and sync contract. Writers emit v2 (sound events, tone detail, titles and deletion markers); v1 imports remain supported. Text and metadata only, never audio or video. Times are seconds since session start on the phone monotonic clock.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,7 +13,10 @@
   "properties": {
     "export_version": {
       "type": "string",
-      "const": "1"
+      "enum": [
+        "1",
+        "2"
+      ]
     },
     "exported_at": {
       "$ref": "#/$defs/Timestamp",
@@ -100,7 +103,7 @@
           "type": "string"
         },
         "speaker_id": {
-          "description": "Face id chosen by fusion, or \"unknown\" (off-screen/ambiguous; shown as \"Someone\").",
+          "description": "Tracked face ID selected by timestamped speaker fusion; unknown when ambiguous or off camera. Display a stable color and numbered speaker label.",
           "anyOf": [
             {
               "$ref": "#/$defs/FaceId"
@@ -129,6 +132,57 @@
         },
         "model_versions": {
           "$ref": "#/$defs/ModelVersions"
+        },
+        "tone_probs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "anger": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "disgust": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "fear": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "happy": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "neutral": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "sad": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "tone_scores": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "arousal": {
+              "type": "number"
+            },
+            "valence": {
+              "type": "number"
+            },
+            "dominance": {
+              "type": "number"
+            }
+          }
         }
       }
     },
@@ -158,6 +212,51 @@
           "items": {
             "$ref": "#/$defs/Caption"
           }
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "deleted_at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Redacted deletion marker for offline sync. Deleted meetings are hidden."
+        },
+        "sound_events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SoundEvent"
+          }
+        }
+      }
+    },
+    "SoundEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "t",
+        "confidence",
+        "model_version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "label": {
+          "type": "string"
+        },
+        "t": {
+          "$ref": "#/$defs/Seconds"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "model_version": {
+          "type": "string"
         }
       }
     }

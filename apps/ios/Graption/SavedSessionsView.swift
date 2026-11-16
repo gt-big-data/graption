@@ -4,6 +4,11 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct SavedSessionsView: View {
+    var activeSessionID: UUID? = nil
+    @AppStorage("meetingRetentionDays") private var retentionDays = 0
+    @State private var renaming: SavedSession?
+    @State private var deleting: SavedSession?
+    @State private var meetingTitle = ""
     @State private var store: FileSessionStore?
     @State private var recorder: SessionRecorder?
     @State private var sessions: [SavedSession] = []
@@ -39,24 +44,46 @@ struct SavedSessionsView: View {
                     }
                     ForEach(sessions) { session in
                         NavigationLink {
-                            List {
-                                ForEach(session.captions) { caption in
-                                    CaptionRow(caption: caption)
+                            SavedMeetingDetail(session: session)
+                                .toolbar {
+                                    ShareLink(item: ExportDocument(sessions: [session]),
+                                        preview: SharePreview("Graption meeting")) {
+                                        Label("Export", systemImage: "square.and.arrow.up")
+                                    }
                                 }
-                            }
-                            .navigationTitle("Saved transcript")
-                            .toolbar { ShareLink(item: ExportDocument(sessions: [session]), preview: SharePreview("Graption meetings")) { Label("Export", systemImage: "square.and.arrow.up") } }
                         } label: {
                             VStack(alignment: .leading) {
+                                Text(session.displayTitle)
                                 Text(session.startedAt.formatted(date: .abbreviated, time: .standard))
+                                    .font(.caption)
                                 Text("\(session.captions.count) captions")
                                     .font(.subheadline)
                             }
+                        }
+                        .swipeActions {
+                            if session.id != activeSessionID {
+                                Button("Delete", role: .destructive) { deleting = session }
+                            }
+                            Button("Rename") {
+                                meetingTitle = session.title ?? ""
+                                renaming = session
+                            }
+                            .tint(.blue)
                         }
                     }
                     Button("Reload Saved Sessions") {
                         Task { await reload() }
                     }
+                }
+                Section("Retention") {
+                    Picker("Keep meetings", selection: $retentionDays) {
+                        Text("Forever").tag(0)
+                        Text("7 days").tag(7)
+                        Text("30 days").tag(30)
+                        Text("90 days").tag(90)
+                    }
+                    Text("Older meetings are removed from this iPhone. Deletions reach the server on the next sync. Active meetings are kept.")
+                        .font(.footnote)
                 }
             }
             .navigationTitle("Saved sessions")
@@ -79,6 +106,34 @@ struct SavedSessionsView: View {
                 errorMessage = "Could not open local session storage. \(error.localizedDescription)"
             }
         }
+        .onChange(of: retentionDays) { _, _ in Task { await reload() } }
+        .alert("Rename meeting", isPresented: Binding(
+            get: { renaming != nil }, set: { if !$0 { renaming = nil } }
+        )) {
+            TextField("Meeting name", text: $meetingTitle)
+            Button("Save") {
+                guard let id = renaming?.id, let store else { return }
+                Task {
+                    do { try await store.rename(id, title: meetingTitle); await reload() }
+                    catch { errorMessage = error.localizedDescription }
+                }
+                renaming = nil
+            }
+            Button("Cancel", role: .cancel) { renaming = nil }
+        }
+        .confirmationDialog("Delete this meeting from the iPhone and server?", isPresented: Binding(
+            get: { deleting != nil }, set: { if !$0 { deleting = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete meeting", role: .destructive) {
+                guard let id = deleting?.id, let store else { return }
+                Task {
+                    do { try await store.delete(id); await reload() }
+                    catch { errorMessage = error.localizedDescription }
+                }
+                deleting = nil
+            }
+            Button("Cancel", role: .cancel) { deleting = nil }
+        }
         .alert("Session storage", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
@@ -92,6 +147,10 @@ struct SavedSessionsView: View {
     private func reload() async {
         guard let store else { return }
         do {
+            if retentionDays > 0 {
+                try await store.prune(olderThan: Date().addingTimeInterval(-Double(retentionDays) * 86400),
+                    excluding: activeSessionID)
+            }
             sessions = try await store.loadSessions()
         } catch {
             errorMessage = "Could not load saved sessions. \(error.localizedDescription)"
@@ -128,17 +187,53 @@ struct SavedSessionsView: View {
     #endif
 }
 
+private struct SavedMeetingDetail: View {
+    let session: SavedSession
+
+    var body: some View {
+        List {
+            Section("Transcript") {
+                ForEach(session.captions) { CaptionRow(caption: $0) }
+            }
+            Section("Sound alerts") {
+                if (session.soundEvents ?? []).isEmpty { Text("No saved sound alerts.") }
+                ForEach(session.soundEvents ?? []) { event in
+                    VStack(alignment: .leading) {
+                        Text(event.label).font(.headline)
+                        Text("\(event.t.formatted()) seconds · \(event.confidence.formatted(.percent)) confidence")
+                        Text(event.modelVersion).font(.caption)
+                    }
+                }
+            }
+        }
+        .navigationTitle(session.displayTitle)
+    }
+}
+
 private struct CaptionRow: View {
     let caption: SavedCaption
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(caption.speakerID == "unknown" ? "Someone" : caption.speakerID)
+            Text(speakerLabel(caption.speakerID))
                 .font(.headline)
+                .foregroundStyle(colorForSpeaker(caption.speakerID))
             Text(caption.text)
             if let tone = caption.toneTag {
                 Text("Tone: \(tone)")
                     .font(.subheadline)
+            }
+            if let probs = caption.toneProbs {
+                ForEach(probs.keys.sorted(), id: \.self) { emotion in
+                    Text("\(emotion): \((probs[emotion] ?? 0).formatted(.percent.precision(.fractionLength(0))))")
+                        .font(.caption)
+                }
+            }
+            if let scores = caption.toneScores {
+                ForEach(scores.keys.sorted(), id: \.self) { dimension in
+                    Text("\(dimension): \((scores[dimension] ?? 0).formatted(.number.precision(.fractionLength(2))))")
+                        .font(.caption)
+                }
             }
             Text("\(caption.tStart.formatted())–\(caption.tEnd.formatted()) seconds")
                 .font(.caption)

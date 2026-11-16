@@ -259,10 +259,18 @@ For now the app has two ways to get landmarks, chosen by `LandmarkMode`. **`face
 **FaceTracker** (`GraptionVision/FaceTracker.swift`, unit-tested with `swift test`)
 - Greedy IoU matching of the current frame's faces to existing tracks (IoU ≥ 0.3), then a centroid-distance fallback (within 1.5× the face size) for fast movers.
 - Boxes are smoothed with a One Euro filter. A missed face coasts on its last velocity and is still shown for 2 frames, without landmarks.
-- Drop a track after 2s unseen; until then a returning face gets its old ID back. (Was 1s; on-device testing showed turning the head away and back often takes longer, and the face came back with a new ID. Tradeoff: someone new stepping into the same spot within 2s inherits the ID.) IDs are `f1`, `f2`, … per session, never reused; they restart when the camera stops. Rotating the phone forgets all tracks (their boxes are in the old orientation), so faces get new IDs.
+- Drop a track after 2s unseen; until then a returning face gets its old ID back. (Was 1s; on-device testing showed turning the head away and back often takes longer, and the face came back with a new ID. Tradeoff: someone new stepping into the same spot within 2s inherits the ID.) IDs are `f1`, `f2`, …, never reused within the camera controller lifetime; closing a preview does not restart numbering. Rotating the phone forgets all tracks (their boxes are in the old orientation), so faces get new IDs.
 
 **Speaker guess (until SpeakerModel ships)**
-- `LargestFaceScorer` implements the `SpeakerScorer` protocol: the largest face gets `p = 1`, the rest `0`. The camera view labels that face "talking" and draws it green. The Core ML model replaces it behind the same protocol.
+- Live capture now uses `MouthMotionScorer` behind `SpeakerScorer`: per-track jaw-open,
+  funnel and pucker changes averaged over 0.6s, normalized to 15 fps; 0.2s warmup.
+  Static mouths and missing landmarks score zero. This is a provisional visual heuristic,
+  **not calibrated probability or reliable audio diarization**. Chewing, expressions and
+  silent lip movements can fool it. `LargestFaceScorer` remains a test stub, not the live scorer.
+  A trained Core ML model can replace this scorer behind the same protocol.
+- Face boxes and captions share colors keyed by tracked ID, plus numbered labels for
+  accessibility. Unknown speakers are gray. IDs are not reused when a preview closes;
+  the camera continues while a meeting is recording, including in transcript view.
 
 **FeatureBuilder** (`GraptionVision/FeatureBuilder.swift`, spec version `features-v1`)
 Must match `ml/common/features.py` exactly: same order, same normalization. `FeatureBuilderTests` (`swift test`) reproduces every value in `ml/common/fixtures/features_v1.json`, which `ml/common/make_fixtures.py` generates from the Python code; `ml/common/tests/` fails if that file is stale. It produces one vector per face per frame, in this **locked order**:
@@ -339,7 +347,12 @@ for caption [t0, t1]:
     best, second = top-2 means
     speaker = best.face_id if best.p >= 0.5 and best.p - second.p >= 0.15 else "unknown"
 ```
-- `"unknown"` means off-screen or ambiguous. Show it as "Someone."
+- `"unknown"` means off-screen or ambiguous. Show it as "Unknown speaker" in gray.
+- `SpeakerScoreBuffer` collects camera scores on the same host-clock origin supplied to
+  microphone capture. Resolve each segment using P7's `captionSpeaker` when VAD delivers
+  it, before ASR queue delays; the buffer retains 15s to cover the 10s maximum segment.
+  Require three frames covering at least half the segment; absent faces contribute zero.
+  Segment speaker IDs reach live cards, transcript, local saves, exports and the dashboard.
 - When a `tone_result` arrives, attach its tag to the caption by `caption_id`.
 
 **SoundAnalysis**
@@ -375,15 +388,16 @@ for caption [t0, t1]:
 
 **Past-meetings dashboard** (Platform)
 
-Saved meeting data leaves the phone only through an explicit user-initiated export.
+Saved meeting text and metadata automatically sync to the configured tone server while the app is active.
+With no server configured, meetings remain local; explicit JSON export is also available.
 The versioned JSON export contains captions and metadata, never audio or raw events.
-The web dashboard reads exports locally in memory.
+The web dashboard reads local exports in memory or loads synced meetings from the server.
 - Lists saved sessions. Each shows its caption log (speaker, text, tone tag) and an AI summary/notes (section 10).
-- Stores caption text, speakers, tags, and timings **on-device only**. Never audio or video.
+- Stores caption text, speakers, tags, and timings locally and on the configured server. Never audio or video.
 - Works offline. Summaries that need a model the device lacks are simply unavailable.
-- Meeting data leaves the phone only when the user taps Export. Exported files follow `schemas/session_export.schema.json` and contain  saved captions and session metadata, never audio or raw events.
+- Automatic sync and explicit exports follow `schemas/session_export.schema.json` and contain  saved captions and session metadata, never audio or raw events.
 - **Caption persistence implemented (issue #29):** `GraptionCore.SessionRecorder` collects
-  caption records and atomically saves a completed session through `SessionStore`.
+  caption/sound records and atomically checkpoints and saves a completed session through `SessionStore`.
   `FileSessionStore` uses one versioned JSON file per session in private Application Support
   (`Sessions/`), excluded from device/iCloud backups and protected while the phone is locked.
   Records contain session ID/date/duration and caption ID/text/speaker/tone/times/model versions;
@@ -391,12 +405,33 @@ The web dashboard reads exports locally in memory.
   Tone is optional; late results update the same saved session by caption ID without delaying end.
   Save errors retain the transcript for retry. History loading reports corrupt or unsupported
   files as an error instead of silently returning an empty history.
-- The app has a live ASR pipeline, but persistence is not yet wired to live capture.
-  The **Saved sessions** sheet is available from the live and model-install screens.
-  Debug builds provide **Start Fake Session**
-  and **End Session & Save**, plus saved-transcript inspection/reload to verify persistence
-  across termination. Future capture wiring must call `append`, `applyTone`, and `end` on the
-  session recorder. The full dashboard and summaries remain later work.
+- Live capture now checkpoints delivered captions to local storage and finalizes after Stop
+  drains pending transcriptions. Leaving the app stops capture and saves delivered text.
+  Each microphone Start creates a meeting; calibration is excluded. Storage v2 reads old
+  storage v1 records and adds title, sound events, tone probabilities/dimensional scores,
+  and redacted deletion markers. Portable export writers emit `export_version: "2"`;
+  the dashboard and sync server still read v1 exports. The live events schema stays v1.3.
+  Sound records include ID, phone-relative time, label, confidence and model version.
+  Tone details follow caption IDs, including late results owned by an earlier meeting.
+  No raw vision events, recordings, or landmarks are saved by meeting persistence.
+- Saved sessions supports rename and delete (swipe actions), with default date-based names.
+  Retention options are forever (default), 7, 30 or 90 days, applied while the app is active
+  and when opening history. Active meetings are excluded. A deletion atomically replaces
+  the local transcript with a redacted UUID/date marker; the server does the same on sync
+  and refuses to resurrect it from a stale retry. Name edits survive late recorder writes.
+  Retention/deletion also affect the server once the phone reconnects. Tiny deletion markers
+  remain to make retries safe; separately exported JSON files are not modified.
+- When `TONE_URL` is configured, the app uploads locally saved meetings to `/api/meetings`
+  every 15 seconds while active, rechecking on launch/foreground. Local files are the durable
+  retry queue; server writes upsert by UUID, including late tone updates. No audio is uploaded
+  by meeting sync. Sync reuses `TONE_TOKEN` authentication. It does not run while suspended.
+- The server stores meetings in SQLite (`MEETINGS_DB`, default `data/meetings.sqlite3`).
+  `GET /api/meetings` returns the portable v2 export for the dashboard's Load / refresh action.
+  This is a shared development server, with no per-user accounts or isolation. Use persistent
+  storage for the database; ephemeral cloud disks cannot guarantee retention.
+- Build `apps/web` before starting the server to serve the dashboard at `/graption/`.
+  During web development Vite proxies `/api` to localhost:8000. Summaries remain later work.
+
 
 **Debug mode**
 - Records a session: video file, per-frame `FeatureBuilder` vectors (JSONL), audio WAV, and all events.
@@ -660,7 +695,7 @@ If the device is overloaded, degrade in this order:
 
 - Does iOS Club have an Apple Developer team account Graption can use?
 - AVA on a Mac: download status, and how large a subset we can extract and train on locally.
-- Dashboard scope: summaries, notes, or both? How long are past meetings kept on-device?
+- Dashboard scope: summaries, notes, or both? Retention is user-selectable (forever/7/30/90 days).
 - Oldest iPhone on the team (for performance benchmarks), and which team devices support Apple Intelligence (for Foundation Models).
 - Budget approval outcome.
 
