@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var toneScores: [UUID: [String: Double]] = [:]
     @State private var sessionStore: FileSessionStore?
     @State private var recorder: SessionRecorder?
+    @State private var isSavingCaptions = false
     @State private var persistenceError: String?
     @State private var syncStatus = "Meetings saved locally"
     @State private var meetingSync = MeetingSyncClient()
@@ -161,7 +162,21 @@ struct ContentView: View {
                     onTranscript: {
                         transcriptReturnsToLive = true
                         showTranscript = true
-                    }
+                    },
+                    onSaveCaptions: {
+                        isSavingCaptions = true
+                        Task {
+                            await saveMeeting()
+                            if persistenceError == nil {
+                                status = "Captions saved on iPhone — view Saved sessions from Home"
+                                AccessibilityNotification.Announcement("Captions saved on iPhone").post()
+                            }
+                            isSavingCaptions = false
+                        }
+                    },
+                    canSaveCaptions: recorder != nil && !captions.isEmpty
+                        && !isStarting && !isCalibrating && !flushingCapture
+                        && pendingCaptions == 0 && !isSavingCaptions
                 )
             } else {
                 InstallBaseEnPage(isInstalling: isPreparing, detail: setupFailed ? status : nil) {

@@ -371,6 +371,11 @@ for caption [t0, t1]:
 - If disconnected, drop tone silently and retry the connection every 5s. This must never affect captions.
 
 **UI**
+- Live captions has visible **Start/Stop transcribing** and **Save captions** buttons
+  below the camera feed. Stop flushes pending speech and retains automatic saving.
+  Save writes the current transcript without stopping active capture; it is disabled
+  until captions exist and pending transcriptions finish. A visible status and VoiceOver
+  announcement confirm success. Saved transcripts are under Home → Saved sessions.
 - Live caption list, with the speaker name/color matching a highlight box drawn on that face.
 - Combined A2/A3 demo places matching large Start/Stop listening and calibration
   controls above the caption feed, with sound banners, haptics, and accessibility

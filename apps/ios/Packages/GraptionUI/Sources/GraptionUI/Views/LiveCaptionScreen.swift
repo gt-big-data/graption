@@ -27,6 +27,8 @@ public struct LiveCaptionScreen: View {
     private let isSettingUp: Bool
     private let onHome: (() -> Void)?
     private let onTranscript: (() -> Void)?
+    private let onSaveCaptions: (() -> Void)?
+    private let canSaveCaptions: Bool
 
     public init(
         cameraPreviewDestination: (() -> AnyView)? = nil,
@@ -43,7 +45,9 @@ public struct LiveCaptionScreen: View {
         calibrationCount: Int? = nil,
         isSettingUp: Bool = false,
         onHome: (() -> Void)? = nil,
-        onTranscript: (() -> Void)? = nil
+        onTranscript: (() -> Void)? = nil,
+        onSaveCaptions: (() -> Void)? = nil,
+        canSaveCaptions: Bool = false
     ) {
         self.cameraPreviewDestination = cameraPreviewDestination
         self.suppliedCaptions = captions
@@ -60,6 +64,8 @@ public struct LiveCaptionScreen: View {
         self.isSettingUp = isSettingUp
         self.onHome = onHome
         self.onTranscript = onTranscript
+        self.onSaveCaptions = onSaveCaptions
+        self.canSaveCaptions = canSaveCaptions
     }
 
     private var usesLiveAudio: Bool { onMicrophone != nil }
@@ -92,6 +98,10 @@ public struct LiveCaptionScreen: View {
 
                 videoArea
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if usesLiveAudio {
+                    transcriptionControls
+                }
 
                 if onSetup != nil || onCalibrate != nil {
                     preparationRow
@@ -175,6 +185,38 @@ public struct LiveCaptionScreen: View {
                 .animation(.easeOut(duration: 0.3), value: displayedCaptions.map(\.id))
             }
         }
+    }
+
+    private var transcriptionControls: some View {
+        VStack(spacing: 10) {
+            Button(action: { onMicrophone?() }) {
+                Label(isListening ? "Stop transcribing" : "Start transcribing",
+                    systemImage: isListening ? "stop.fill" : "mic.fill")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .disabled(!isListening && !canListen)
+
+            if let onSaveCaptions {
+                Button(action: onSaveCaptions) {
+                    Label("Save captions", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .disabled(!canSaveCaptions)
+            }
+
+            if let statusText {
+                Text(statusText)
+                    .font(.footnote)
+                    .foregroundStyle(Color.graptionSecondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Color.graptionAccent)
+        .foregroundStyle(.black)
+        .padding(16)
+        .background(Color.graptionBackground)
     }
 
     private var preparationRow: some View {
