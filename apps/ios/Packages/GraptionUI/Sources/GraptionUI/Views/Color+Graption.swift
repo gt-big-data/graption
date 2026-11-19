@@ -8,8 +8,10 @@ extension Color {
         self.init(red: r, green: g, blue: b)
     }
 
-    public static let graptionBackground = Color(hex: 0x0B1F3B)
-    public static let graptionBubble = Color(hex: 0x1E314A)
-    public static let graptionAccent = Color(hex: 0xFF9500)
-    public static let graptionSecondaryText = Color(hex: 0x93C5FD)
+    // Pine Peach palette, matching the logo.
+    public static let graptionBackground = Color(hex: 0x1D3A3A)
+    public static let graptionBubble = Color(hex: 0x264A4A)
+    public static let graptionAccent = Color(hex: 0xFBE6D4)
+    public static let graptionPeach = Color(hex: 0xE8A07E)
+    public static let graptionSecondaryText = Color(hex: 0x93CDC1)
 }
