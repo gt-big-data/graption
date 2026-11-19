@@ -364,6 +364,8 @@ for caption [t0, t1]:
   Require three frames covering at least half the segment; absent faces contribute zero.
   Segment speaker IDs reach live cards, transcript, local saves, exports and the dashboard.
 - When a `tone_result` arrives, attach its tag to the caption by `caption_id`.
+  A live caption can wait up to 30 additional seconds for a pending result.
+  If a tag arrives during that wait, keep the caption visible for two more seconds.
 
 **SoundAnalysis**
 - Filter to an allowlist: doorbell, knock, smoke/fire alarm, siren, dog bark, baby cry, laughter, phone ring.
@@ -387,6 +389,7 @@ for caption [t0, t1]:
   until captions exist and pending transcriptions finish. A visible status and VoiceOver
   announcement confirm success. Saved transcripts are under Home → Saved sessions.
 - Live caption list, with the speaker name/color matching a highlight box drawn on that face.
+  On landscape iPhones, the two newest live captions appear in a centered column over the camera.
 - Combined A2/A3 demo places matching large Start/Stop listening and calibration
   controls above the caption feed, with sound banners, haptics, and accessibility
   announcements. Stop clears the current banner while pending captions finish.
