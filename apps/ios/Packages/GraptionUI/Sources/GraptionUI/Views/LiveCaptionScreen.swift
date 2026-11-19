@@ -219,6 +219,13 @@ public struct LiveCaptionScreen: View {
     private func transcriptionControls(onMicrophone: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
+                if let onHome {
+                    Button(action: onHome) {
+                        cameraControlIcon("house")
+                    }
+                    .accessibilityLabel("Back to Home")
+                }
+
                 Button(action: onMicrophone) {
                     cameraControlIcon(isListening ? "stop.fill" : "mic.fill")
                         .foregroundStyle(isListening ? Color.graptionPeach : .white)
