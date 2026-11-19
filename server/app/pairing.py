@@ -100,6 +100,15 @@ class PairingCode(BaseModel):
     code: str = Field(min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
 
 
+@router.get("/api/pairing")
+async def restore_dashboard_access(request: Request):
+    require_local_dashboard(request)
+    token = server_token()
+    if not token:
+        raise HTTPException(404, "No server credential has been configured.")
+    return JSONResponse({"token": token}, headers={"Cache-Control": "no-store"})
+
+
 @router.post("/api/pairing")
 async def create_pairing(request: Request):
     require_local_dashboard(request)

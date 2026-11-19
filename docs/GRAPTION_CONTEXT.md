@@ -450,7 +450,9 @@ The web dashboard reads local exports in memory or loads synced meetings from th
   retry queue; server writes upsert by UUID, including late tone updates. No audio is uploaded
   by meeting sync. Sync reuses the tone server's bearer credential. It does not run while suspended.
 - The server stores meetings in SQLite (`MEETINGS_DB`, default `data/meetings.sqlite3`).
-  `GET /api/meetings` returns the portable v2 export for the dashboard's Load / refresh action.
+  `GET /api/meetings` returns the portable v2 export. The localhost dashboard can recover
+  its existing server credential without issuing a new pairing code. The paired dashboard
+  loads meetings on open and refreshes every 15 seconds. Manual refresh is also available.
   This is a shared development server, with no per-user accounts or isolation. Use persistent
   storage for the database; ephemeral cloud disks cannot guarantee retention.
 - Build `apps/web` before starting the server to serve the dashboard at `/graption/`.

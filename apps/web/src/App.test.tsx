@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import App from './App';
 import example from '../../../schemas/fixtures/session_export.example.json';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(null, '', '/'); });
 test('loads exports and opens a transcript with speaker and tone', async () => {
   render(<App />);
   const file = new File([JSON.stringify(example)], 'example.json', { type: 'application/json' });
@@ -19,7 +19,7 @@ test('loads exports and opens a transcript with speaker and tone', async () => {
   fireEvent.click(screen.getAllByRole('button', { name: /captions/i })[0]);
   expect(screen.getByText('Unknown speaker')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /back to meetings/i }));
-  fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Clear imports' }));
   expect(screen.getByText('No meetings loaded yet.')).toBeInTheDocument();
 });
 test('reports an invalid file', async () => {
@@ -99,18 +99,34 @@ test('shows a pairing QR and restores dashboard access after reopening', async (
   });
   const fetcher = vi.fn()
     .mockResolvedValueOnce({ ok: true, json: async () => ({ qr: '<svg/>', token: 'paired-token' }) })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ ...example, sessions: [] }) });
+    .mockResolvedValue({ ok: true, json: async () => ({ ...example, sessions: [example.sessions[0]] }) });
   vi.stubGlobal('fetch', fetcher);
   const page = render(<App />);
   fireEvent.click(screen.getByRole('button', { name: 'Pair an iPhone or iPad' }));
   const qr = await screen.findByRole('img', { name: 'Graption device pairing QR code' });
   expect(qr).toHaveAttribute('src', expect.stringContaining('data:image/svg+xml'));
   expect(fetcher).toHaveBeenCalledWith('/api/pairing', { method: 'POST' });
+  expect(await screen.findByText('Loaded 1 saved meetings')).toBeInTheDocument();
   page.unmount();
   render(<App />);
-  fireEvent.click(screen.getByRole('button', { name: /refresh from server/i }));
-  expect(fetcher).toHaveBeenLastCalledWith('/api/meetings', {
+  expect(fetcher).toHaveBeenLastCalledWith('/api/meetings', expect.objectContaining({
     headers: { Authorization: 'Bearer paired-token' },
-  });
-  expect(await screen.findByText('Loaded 0 saved meetings')).toBeInTheDocument();
+  }));
+  fireEvent.click(await screen.findByRole('button', { name: /captions/i }));
+  expect(screen.getByText(example.sessions[0].captions[0].text)).toBeInTheDocument();
+});
+
+test('opens synced transcripts on the Mac without browser pairing state', async () => {
+  const meeting = { ...example.sessions[0], title: 'Rehearsal' };
+  window.history.replaceState(null, '', '/graption/');
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'existing-token' }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ...example, sessions: [meeting] }) });
+  vi.stubGlobal('fetch', fetcher);
+  render(<App />);
+  expect(await screen.findByRole('button', { name: /Rehearsal/ })).toBeInTheDocument();
+  expect(fetcher).toHaveBeenNthCalledWith(1, '/api/pairing', expect.any(Object));
+  expect(fetcher).toHaveBeenNthCalledWith(2, '/api/meetings', expect.objectContaining({
+    headers: { Authorization: 'Bearer existing-token' },
+  }));
 });

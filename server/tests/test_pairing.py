@@ -23,7 +23,9 @@ def test_pairing_issues_code_only_on_mac_and_persists_credential(monkeypatch, tm
         return make_qr(payload, **kwargs)
 
     monkeypatch.setattr(pairing.segno, "make_qr", capture_qr)
+    assert mac.get("/api/pairing").status_code == 404
     assert ipad.post("/api/pairing").status_code == 403
+    assert ipad.get("/api/pairing").status_code == 403
     assert mac.post("/api/pairing", headers={"Origin": "http://elsewhere"}).status_code == 403
     assert mac.post("/api/pairing", headers={"X-Forwarded-For": "192.168.1.5"}).status_code == 403
     response = mac.post("/api/pairing", headers={"Origin": "http://localhost:8000"})
@@ -36,6 +38,10 @@ def test_pairing_issues_code_only_on_mac_and_persists_credential(monkeypatch, tm
     code = {"code": captured[0]["code"]}
     assert ipad.post("/api/pairing/connect", json=code).json()["token"] == token
     assert ipad.post("/api/pairing/connect", json=code).status_code == 401
+    restored = mac.get("/api/pairing")
+    assert restored.json() == {"token": token}
+    assert restored.headers["Cache-Control"] == "no-store"
+    assert mac.get("/api/pairing", headers={"Origin": "http://elsewhere"}).status_code == 403
 
     later = TestClient(create_app())
     headers = {"Authorization": f"Bearer {token}"}
