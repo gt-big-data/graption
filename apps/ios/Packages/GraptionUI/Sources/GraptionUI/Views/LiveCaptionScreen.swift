@@ -26,6 +26,7 @@ public struct LiveCaptionScreen: View {
     private let onCalibrate: (() -> Void)?
     private let isCalibrating: Bool
     private let calibrationCount: Int?
+    private let onSkipCalibration: (() -> Void)?
     private let isSettingUp: Bool
     private let onHome: (() -> Void)?
     private let onTranscript: (() -> Void)?
@@ -45,6 +46,7 @@ public struct LiveCaptionScreen: View {
         onCalibrate: (() -> Void)? = nil,
         isCalibrating: Bool = false,
         calibrationCount: Int? = nil,
+        onSkipCalibration: (() -> Void)? = nil,
         isSettingUp: Bool = false,
         onHome: (() -> Void)? = nil,
         onTranscript: (() -> Void)? = nil,
@@ -63,6 +65,7 @@ public struct LiveCaptionScreen: View {
         self.onCalibrate = onCalibrate
         self.isCalibrating = isCalibrating
         self.calibrationCount = calibrationCount
+        self.onSkipCalibration = onSkipCalibration
         self.isSettingUp = isSettingUp
         self.onHome = onHome
         self.onTranscript = onTranscript
@@ -143,21 +146,32 @@ public struct LiveCaptionScreen: View {
                 ZStack {
                     Color.black.opacity(0.55).ignoresSafeArea()
                     VStack(spacing: 8) {
-                        Text("Calibrating")
-                            .font(.title2.bold())
-                            .foregroundStyle(Color.graptionAccent)
-                        Text("\(calibrationCount)")
-                            .font(.system(size: 120, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(.white)
-                            .contentTransition(.numericText())
-                        Text("Keep the room quiet")
-                            .font(.title3.bold())
-                            .foregroundStyle(Color.graptionAccent)
+                        VStack(spacing: 8) {
+                            Text("Calibrating")
+                                .font(.title2.bold())
+                            Text("\(calibrationCount)")
+                                .font(.system(size: isLandscape ? 64 : 120, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(.white)
+                                .contentTransition(.numericText())
+                            Text("Keep the room quiet")
+                                .font(.title3.bold())
+                        }
+                        .foregroundStyle(Color.graptionAccent)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Calibrating. Keep the room quiet. \(calibrationCount)")
+
+                        if let onSkipCalibration {
+                            Button(action: onSkipCalibration) {
+                                Text("Skip calibration")
+                                    .frame(minHeight: 44)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Color.graptionAccent)
+                            .foregroundStyle(Color.graptionBackground)
+                        }
                     }
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Calibrating. Keep the room quiet. \(calibrationCount)")
             }
         }
         .toolbar(.hidden, for: .navigationBar)

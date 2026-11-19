@@ -43,8 +43,8 @@ struct ContentView: View {
     @State private var isRecording = false
     @State private var isCalibrating = false
     @State private var calibrationCount: Int?
+    @State private var calibrationTask: Task<Bool, Never>?
     @State private var isStarting = false
-    @State private var threshold: Float = 0.001
     @State private var isPreparing = false
     @State private var isReady = false
     @State private var status = "Loading base.en…"
@@ -163,6 +163,7 @@ struct ContentView: View {
                         }
                     },
                     calibrationCount: calibrationCount,
+                    onSkipCalibration: { calibrationTask?.cancel() },
                     isSettingUp: isPreparing,
                     onHome: {
                         // Leaving live captions turns the microphone off; the
@@ -315,8 +316,10 @@ struct ContentView: View {
         }
         capture.onError = { error in
             if isCalibrating {
-                capture.stop()
                 isCalibrating = false
+                calibrationCount = nil
+                calibrationTask?.cancel()
+                capture.stop()
             }
             report(error)
         }
@@ -428,25 +431,37 @@ struct ContentView: View {
         }
         isCalibrating = true
         status = "Keep the room quiet"
-        for count in [3, 2, 1] {
-            guard !Task.isCancelled, isVisible, isCalibrating else { return }
-            calibrationCount = count
-            do {
-                try await Task.sleep(for: .seconds(1))
-            } catch {
-                return
+        let countdown = Task { @MainActor in
+            for count in [3, 2, 1] {
+                guard !Task.isCancelled else { return false }
+                calibrationCount = count
+                do {
+                    try await Task.sleep(for: .seconds(1))
+                } catch {
+                    return false
+                }
             }
+            return !Task.isCancelled
         }
+        calibrationTask = countdown
+        let shouldApplyCalibration = await countdown.value
+        calibrationTask = nil
         guard !Task.isCancelled, isVisible, isCalibrating else { return }
         calibrationCount = nil
         isCalibrating = false
-        do {
-            threshold = try capture.stopCalibration()
-            print(String(format: "Calibrated RMS threshold: %.6f", threshold))
-        } catch {
+        if shouldApplyCalibration {
+            do {
+                let threshold = try capture.stopCalibration()
+                print(String(format: "Calibrated RMS threshold: %.6f", threshold))
+            } catch CalibrationError.tooShort {
+                print("Calibration too short. Using the previous RMS threshold.")
+            } catch {
+                capture.stop()
+                report(error)
+                return
+            }
+        } else {
             capture.stop()
-            report(error)
-            return
         }
         guard !Task.isCancelled, isVisible else { return }
         do {
@@ -481,6 +496,7 @@ struct ContentView: View {
         isCalibrating = false
         calibrationCount = nil
         isRecording = false
+        calibrationTask?.cancel()
         listenTask?.cancel()
         listenTask = nil
         flushingCapture = true
