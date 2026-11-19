@@ -45,11 +45,18 @@ public final class ToneConnectionMonitor: ObservableObject {
             tEnd: tEnd, sampleRate: 16_000, pcm16: pcm)
     }
 
-    private let client: ToneClient?
+    private var client: ToneClient?
     private var monitorTask: Task<Void, Never>?
 
     public init(configuration: ToneClientConfiguration?) {
         self.client = configuration.map { ToneClient(configuration: $0) }
+    }
+
+    public func configure(_ configuration: ToneClientConfiguration) {
+        stop()
+        latestModelVersion = nil
+        client = ToneClient(configuration: configuration)
+        start()
     }
 
     public func start() {
@@ -79,10 +86,12 @@ public final class ToneConnectionMonitor: ObservableObject {
                     pcm16: Data([0, 0])
                 )
                 _ = try await client.receiveNext()
+                try Task.checkCancellation()
                 state = .connected
 
                 while !Task.isCancelled {
                     let reply = try await client.receiveNext()
+                    try Task.checkCancellation()
                     if case .toneResult(let event) = reply, let id = event.captionID {
                         latestModelVersion = event.modelVersion
                         onToneDetails?(event)
@@ -93,6 +102,7 @@ public final class ToneConnectionMonitor: ObservableObject {
                 break
             } catch {
                 await client.disconnect()
+                guard !Task.isCancelled else { break }
                 state = .retrying
                 try? await Task.sleep(for: ToneClient.reconnectDelay)
             }

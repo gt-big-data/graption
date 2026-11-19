@@ -444,10 +444,10 @@ The web dashboard reads local exports in memory or loads synced meetings from th
   and refuses to resurrect it from a stale retry. Name edits survive late recorder writes.
   Retention/deletion also affect the server once the phone reconnects. Tiny deletion markers
   remain to make retries safe; separately exported JSON files are not modified.
-- When `TONE_URL` is configured, the app uploads locally saved meetings to `/api/meetings`
+- When the app pairs with a Mac or has `TONE_URL` configured, it uploads locally saved meetings to `/api/meetings`
   every 15 seconds while active, rechecking on launch/foreground. Local files are the durable
   retry queue; server writes upsert by UUID, including late tone updates. No audio is uploaded
-  by meeting sync. Sync reuses `TONE_TOKEN` authentication. It does not run while suspended.
+  by meeting sync. Sync reuses the tone server's bearer credential. It does not run while suspended.
 - The server stores meetings in SQLite (`MEETINGS_DB`, default `data/meetings.sqlite3`).
   `GET /api/meetings` returns the portable v2 export for the dashboard's Load / refresh action.
   This is a shared development server, with no per-user accounts or isolation. Use persistent
@@ -503,7 +503,13 @@ The web dashboard reads local exports in memory or loads synced meetings from th
   - Allow a WebSocket request timeout of at least 60 min.
   - Bake the WavLM and head weights into the image so cold starts don't download them.
 - **Endpoint:** `/ws/session`. One connection per app session, handling `tone_request` and `caption_log`.
-- **Auth:** if `TONE_TOKEN` is set, require a matching bearer token. Always set it outside `local` mode.
+- **Pairing:** the Mac's localhost dashboard issues a two-minute, single-use QR code with its
+  Bonjour `.local` address and a pairing code. In Connection & Preferences, the device scans and
+  exchanges the code for its credentials. The server saves its bearer credential alongside
+  the meeting database with owner-only permissions. The app stores the connection in the device
+  Keychain and reconnects for tone, meeting sync, and optional Mac ASR.
+- **Auth:** require a matching bearer token once pairing generates one or `TONE_TOKEN` is set.
+  Non-local modes require a token. `TONE_TOKEN` remains available for manual deployments.
 - **Pipeline** (device auto-select: `cuda` → `mps` → `cpu`; the code must run correctly on all three):
   1. Decode PCM16 and resample to 16 kHz if needed.
   2. WavLM-base+ (frozen), `output_hidden_states=True`, giving 13 layers × T × 768.
@@ -615,8 +621,8 @@ The mapping is `EMOTION_TAGS` in `server/app/tone.py`, applied by `emotion_tag` 
 
 **Feature:** a post-session "catch me up" summary/notes built from the caption log (speaker + text + tone), shown in the past-meetings dashboard (section 6).
 - **Mac dashboard:** a synced meeting supports an on-demand summary and transcript questions
-  through OpenRouter. The Mac holds `OPENROUTER_API_KEY` and requires `TONE_TOKEN` for AI
-  requests. Only the caption text, speaker IDs, timestamps and the requested question leave
+  through OpenRouter. The Mac holds `OPENROUTER_API_KEY` and requires the server bearer
+  credential for AI requests. Only the caption text, speaker IDs, timestamps and the requested question leave
   the Mac for inference. Replies stay in browser memory. iOS capture and offline transcript
   viewing are independent of this service.
 - **Target:** Apple Foundation Models on-device (iOS 26+, Apple Intelligence devices). Free and offline. Use `@Generable` for structured output.
@@ -671,7 +677,9 @@ If the device is overloaded, degrade in this order:
 - **Every event and log** carries model versions.
 - **Every training run** goes to W&B, with the config committed alongside it.
 - **Branching:** PRs to `main`, and CI must pass. Add `CODEOWNERS` per team folder once reviews are enforced.
-- **Secrets** (`TONE_TOKEN`, OpenAI key, cloud credentials) live in `.env` or `.xcconfig` files that are gitignored, never in code or the repo.
+- **Secrets:** manually configured credentials live in gitignored `.env` or `.xcconfig`
+  files. Generated pairing credentials live in the server's private token file and the
+  device Keychain.
 - **Cost control:** Cloud Run scales to zero. Set a billing budget alert at 50% and 90% of the credits. OpenAI keys get a hard monthly spend limit.
 - **Licenses:** the audEERING model and MSP-Podcast are non-commercial. That's fine for this academic MVP, but flag it before any commercial use.
 

@@ -32,6 +32,8 @@ public struct LiveCaptionScreen: View {
     private let onTranscript: (() -> Void)?
     private let onSaveCaptions: (() -> Void)?
     private let canSaveCaptions: Bool
+    private let pairedMacName: String?
+    private let onPairMac: ((String) async throws -> Void)?
 
     public init(
         cameraPreviewDestination: (() -> AnyView)? = nil,
@@ -51,7 +53,9 @@ public struct LiveCaptionScreen: View {
         onHome: (() -> Void)? = nil,
         onTranscript: (() -> Void)? = nil,
         onSaveCaptions: (() -> Void)? = nil,
-        canSaveCaptions: Bool = false
+        canSaveCaptions: Bool = false,
+        pairedMacName: String? = nil,
+        onPairMac: ((String) async throws -> Void)? = nil
     ) {
         self.cameraPreviewDestination = cameraPreviewDestination
         self.suppliedCaptions = captions
@@ -71,6 +75,8 @@ public struct LiveCaptionScreen: View {
         self.onTranscript = onTranscript
         self.onSaveCaptions = onSaveCaptions
         self.canSaveCaptions = canSaveCaptions
+        self.pairedMacName = pairedMacName
+        self.onPairMac = onPairMac
     }
 
     private var usesLiveAudio: Bool { onMicrophone != nil }
@@ -95,7 +101,11 @@ public struct LiveCaptionScreen: View {
         NavigationStack {
             screenContent
                 .navigationDestination(isPresented: $showSettings) {
-                    SettingsScreen(cameraPreviewDestination: cameraPreviewDestination)
+                    SettingsScreen(
+                        cameraPreviewDestination: cameraPreviewDestination,
+                        pairedMacName: pairedMacName,
+                        onPairMac: onPairMac
+                    )
                 }
         }
     }

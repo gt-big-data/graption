@@ -21,6 +21,8 @@ struct ContentView: View {
     @State private var persistenceError: String?
     @State private var syncStatus = "Meetings saved locally"
     @State private var meetingSync = MeetingSyncClient()
+    @State private var pairedMac = MacPairing.load()
+    @State private var pairingRevision = UUID()
     @State private var showHomeScreen = true
     @State private var showTranscript = false
     @State private var showSettings = false
@@ -28,9 +30,8 @@ struct ContentView: View {
     @State private var transcriptReturnsToLive = false
     @State private var capture: MicrophoneCapture?
     @StateObject private var toneMonitor = ToneConnectionMonitor(
-        configuration: ToneClientConfiguration.fromAppConfiguration(
-            sessionID: UUID().uuidString
-        )
+        configuration: MacPairing.load()?.toneConfiguration(sessionID: UUID().uuidString)
+            ?? ToneClientConfiguration.fromAppConfiguration(sessionID: UUID().uuidString)
     )
     @State private var soundAlertModel = SoundAlertModel()
     @State private var hasPrintedLabels = false
@@ -111,7 +112,9 @@ struct ContentView: View {
                     onBack: {
                         showSettings = false
                         showHomeScreen = true
-                    }
+                    },
+                    pairedMacName: pairedMac?.serverURL.host,
+                    onPairMac: pairMac
                 )
             } else if showTranscript {
                 TranscriptScreen(
@@ -188,7 +191,9 @@ struct ContentView: View {
                     },
                     canSaveCaptions: recorder != nil && !captions.isEmpty
                         && !isStarting && !isCalibrating && !flushingCapture
-                        && pendingCaptions == 0 && !isSavingCaptions
+                        && pendingCaptions == 0 && !isSavingCaptions,
+                    pairedMacName: pairedMac?.serverURL.host,
+                    onPairMac: pairMac
                 )
             } else {
                 InstallBaseEnPage(isInstalling: isPreparing, detail: setupFailed ? status : nil) {
@@ -204,7 +209,7 @@ struct ContentView: View {
             set: { if !$0 { persistenceError = nil } }
         )) { Button("Retry save") { Task { await saveMeeting() } } }
         message: { Text(persistenceError ?? "") }
-        .task {
+        .task(id: pairingRevision) {
             do { sessionStore = try FileSessionStore.onDevice() }
             catch { persistenceError = error.localizedDescription }
             while !Task.isCancelled {
@@ -467,7 +472,9 @@ struct ContentView: View {
         do {
             closeASRConnection()
             var transcriber: any CaptionTranscriber = localTranscriber
-            if let configuration = ASRClientConfiguration.fromAppConfiguration() {
+            let asrConfiguration = pairedMac == nil
+                ? ASRClientConfiguration.fromAppConfiguration() : pairedMac?.asrConfiguration
+            if let configuration = asrConfiguration {
                 let client = ASRClient(configuration: configuration)
                 asrClient = client
                 transcriber = FallbackCaptionTranscriber(
@@ -535,6 +542,15 @@ struct ContentView: View {
         } catch { persistenceError = "Could not save meeting. \(error.localizedDescription)" }
     }
 
+    private func pairMac(_ code: String) async throws {
+        let pairing = try await MacPairing.connect(scannedText: code)
+        pairedMac = pairing
+        meetingSync = MeetingSyncClient()
+        pairingRevision = UUID()
+        syncStatus = "Syncing saved meetings"
+        toneMonitor.configure(pairing.toneConfiguration(sessionID: UUID().uuidString))
+    }
+
     private func syncMeetings() async {
         guard let sessionStore else { return }
         do {
@@ -543,11 +559,16 @@ struct ContentView: View {
                 let cutoff = Date().addingTimeInterval(-Double(retentionDays) * 86400)
                 try await sessionStore.prune(olderThan: cutoff, excluding: activeID)
             }
-            guard let configuration = ToneClientConfiguration.fromAppConfiguration(sessionID: "meeting-sync")
+            guard let configuration = pairedMac?.toneConfiguration(sessionID: "meeting-sync")
+                ?? ToneClientConfiguration.fromAppConfiguration(sessionID: "meeting-sync")
             else { return }
+            try Task.checkCancellation()
             try await meetingSync.sync(store: sessionStore, configuration: configuration)
+            try Task.checkCancellation()
             syncStatus = "Saved meetings synced"
-        } catch { syncStatus = "Meetings saved locally; sync will retry" }
+        } catch {
+            if !Task.isCancelled { syncStatus = "Meetings saved locally; sync will retry" }
+        }
     }
 
     private func closeASRConnection() {

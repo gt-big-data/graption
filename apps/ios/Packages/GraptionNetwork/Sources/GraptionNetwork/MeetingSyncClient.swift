@@ -19,6 +19,7 @@ public actor MeetingSyncClient {
         components?.fragment = nil
         guard let url = components?.url else { throw ToneClientError.invalidServerURL }
         for session in try await store.loadSyncSessions() {
+            try Task.checkCancellation()
             let encoder = JSONEncoder()
             encoder.outputFormatting = .sortedKeys
             let fingerprint = try encoder.encode(session)

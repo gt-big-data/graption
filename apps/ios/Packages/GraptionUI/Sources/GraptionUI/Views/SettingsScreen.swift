@@ -1,26 +1,29 @@
+import AVFoundation
 import SwiftUI
+import VisionKit
 
-/// U3: Connection & Preferences. Collects and persists the Mac tone-server
-/// address and the tone-tags toggle locally on the phone. No networking or
-/// server discovery happens here — that's wired up separately once the
-/// tone client exists.
 public struct SettingsScreen: View {
     @Environment(\.dismiss) private var dismiss
-
-    @AppStorage("macServerAddress") private var savedServerAddress: String = ""
     @AppStorage("toneTagsEnabled") private var toneTagsEnabled: Bool = true
-
-    @State private var addressDraft: String = ""
-    @State private var isAddressSaved: Bool = false
-    @FocusState private var isAddressFieldFocused: Bool
-
     @State private var showCameraPreview = false
+    @State private var showPairingScanner = false
+    @State private var isPairing = false
+    @State private var pairingMessage: String?
     private let cameraPreviewDestination: (() -> AnyView)?
     private let onBack: (() -> Void)?
+    private let pairedMacName: String?
+    private let onPairMac: ((String) async throws -> Void)?
 
-    public init(cameraPreviewDestination: (() -> AnyView)? = nil, onBack: (() -> Void)? = nil) {
+    public init(
+        cameraPreviewDestination: (() -> AnyView)? = nil,
+        onBack: (() -> Void)? = nil,
+        pairedMacName: String? = nil,
+        onPairMac: ((String) async throws -> Void)? = nil
+    ) {
         self.cameraPreviewDestination = cameraPreviewDestination
         self.onBack = onBack
+        self.pairedMacName = pairedMacName
+        self.onPairMac = onPairMac
     }
 
     public var body: some View {
@@ -41,9 +44,24 @@ public struct SettingsScreen: View {
         }
         .background(Color.graptionBackground.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .onAppear {
-            addressDraft = savedServerAddress
-            isAddressSaved = !savedServerAddress.isEmpty
+        .sheet(isPresented: $showPairingScanner) {
+            NavigationStack {
+                PairingScanner(onScan: { code in
+                    showPairingScanner = false
+                    Task { await pairMac(code) }
+                }, onFailure: {
+                    showPairingScanner = false
+                    pairingMessage = "The camera could not start scanning."
+                })
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle("Scan pairing code")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { showPairingScanner = false }
+                    }
+                }
+            }
         }
         .fullScreenCover(isPresented: $showCameraPreview) {
             if let cameraPreviewDestination {
@@ -88,82 +106,57 @@ public struct SettingsScreen: View {
 
     private var macServerCard: some View {
         SettingsCard {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Mac Server")
-                    .font(.title3.bold())
-                    .foregroundStyle(Color.graptionAccent)
+            Text("Mac Server")
+                .font(.title3.bold())
+                .foregroundStyle(Color.graptionAccent)
 
-                Spacer(minLength: 8)
+            Text(pairedMacName.map { "Paired with \($0)" } ?? "Open the Graption dashboard on your Mac and choose Pair an iPhone or iPad.")
+                .font(.footnote)
+                .foregroundStyle(Color.graptionSecondaryText)
 
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color.graptionSecondaryText)
-                        .frame(width: 6, height: 6)
-                    Text("Not connected.")
-                        .font(.caption)
-                        .foregroundStyle(Color.graptionSecondaryText)
+            if onPairMac != nil {
+                Button {
+                    Task {
+                        guard DataScannerViewController.isSupported else {
+                            pairingMessage = "This device does not support QR scanning."
+                            return
+                        }
+                        guard await AVCaptureDevice.requestAccess(for: .video),
+                              DataScannerViewController.isAvailable else {
+                            pairingMessage = "Allow camera access in Settings to scan the pairing code."
+                            return
+                        }
+                        pairingMessage = nil
+                        showPairingScanner = true
+                    }
+                } label: {
+                    Label(isPairing ? "Connecting…" : "Scan pairing code", systemImage: "qrcode.viewfinder")
+                        .font(.body.bold())
+                        .foregroundStyle(Color.graptionBackground)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(Color.graptionAccent, in: RoundedRectangle(cornerRadius: 14))
                 }
-                .lineLimit(1)
+                .disabled(isPairing)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Server Address")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(Color.graptionAccent)
-
-                TextField(
-                    "",
-                    text: $addressDraft,
-                    prompt: Text("e.g., 192.168.1.100:8080").foregroundStyle(Color.graptionSecondaryText)
-                )
-                .foregroundStyle(Color.graptionSecondaryText)
-                .font(.callout)
-                .focused($isAddressFieldFocused)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.asciiCapable)
-                .submitLabel(.done)
-                .padding(.horizontal, 14)
-                .frame(height: 48)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.graptionAccent, lineWidth: 1))
-                .onChange(of: addressDraft) { _, newValue in
-                    // Fires for the onAppear restore too, not just user edits,
-                    // so compare against the persisted value instead of
-                    // unconditionally clearing the "saved" state.
-                    isAddressSaved = (newValue == savedServerAddress)
-                }
-
-                Text("Enter the address of the Mac you want to connect to.")
+            if let pairingMessage {
+                Text(pairingMessage)
                     .font(.footnote)
                     .foregroundStyle(Color.graptionSecondaryText)
             }
-
-            Button {
-                isAddressFieldFocused = false
-                savedServerAddress = addressDraft
-                isAddressSaved = true
-            } label: {
-                Text("Save Address")
-                    .font(.body.bold())
-                    .foregroundStyle(Color.graptionBackground)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .background(Color.graptionAccent, in: RoundedRectangle(cornerRadius: 14))
-            }
-
-            if isAddressSaved {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Color.graptionAccent)
-                    Text("Address saved.")
-                        .font(.footnote.bold())
-                        .foregroundStyle(Color.graptionAccent)
-                }
-                .transition(.opacity)
-            }
         }
-        .animation(.easeOut(duration: 0.2), value: isAddressSaved)
+    }
+
+    private func pairMac(_ code: String) async {
+        guard let onPairMac else { return }
+        isPairing = true
+        defer { isPairing = false }
+        do {
+            try await onPairMac(code)
+            pairingMessage = "Mac connection saved."
+        } catch {
+            pairingMessage = error.localizedDescription
+        }
     }
 
     private var accessibilityCard: some View {
@@ -238,16 +231,65 @@ public struct SettingsScreen: View {
                 .foregroundStyle(Color.graptionAccent)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Saved on this iPhone")
+                Text("Saved on this device")
                     .font(.footnote.bold())
                     .foregroundStyle(Color.graptionAccent)
-                Text("Your server address and tone tag preference stay saved when you reopen Graption. No account or cloud sync needed.")
+                Text("Your Mac pairing and tone tag preference stay saved when you reopen Graption.")
                     .font(.footnote)
                     .foregroundStyle(Color.graptionSecondaryText)
             }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 12)
+    }
+}
+
+private struct PairingScanner: UIViewControllerRepresentable {
+    let onScan: (String) -> Void
+    let onFailure: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onScan: onScan) }
+
+    func makeUIViewController(context: Context) -> DataScannerViewController {
+        let scanner = DataScannerViewController(
+            recognizedDataTypes: [.barcode(symbologies: [.qr])],
+            recognizesMultipleItems: false
+        )
+        scanner.delegate = context.coordinator
+        do {
+            try scanner.startScanning()
+        } catch {
+            Task { @MainActor in onFailure() }
+        }
+        return scanner
+    }
+
+    func updateUIViewController(_ scanner: DataScannerViewController, context: Context) {}
+
+    static func dismantleUIViewController(_ scanner: DataScannerViewController, coordinator: Coordinator) {
+        scanner.stopScanning()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, DataScannerViewControllerDelegate {
+        private let onScan: (String) -> Void
+        private var didScan = false
+
+        init(onScan: @escaping (String) -> Void) {
+            self.onScan = onScan
+        }
+
+        func dataScanner(
+            _ scanner: DataScannerViewController,
+            didAdd addedItems: [RecognizedItem],
+            allItems: [RecognizedItem]
+        ) {
+            guard !didScan, case .barcode(let barcode)? = addedItems.first,
+                  let code = barcode.payloadStringValue else { return }
+            didScan = true
+            scanner.stopScanning()
+            onScan(code)
+        }
     }
 }
 
