@@ -6,4 +6,6 @@ Search finds captions across all loaded meetings, ignoring case and accents. Sel
 
 Synced meetings on the Mac dashboard support an optional AI summary and transcript questions. The Mac holds the OpenRouter key. See [Mac server setup](../../server/README.md#optional-meeting-ai-openrouter).
 
+To connect the app, open the dashboard on the Mac at `http://localhost:8000/graption/` and choose **Pair an iPhone or iPad**. Scan the code in Graption under **Connection & Preferences**.
+
 The Web dashboard workflow checks generated types, lint, typecheck, tests and the production build. Merges to main deploy to https://gt-big-data.github.io/graption/. A repository admin must select **Settings → Pages → Source → GitHub Actions** before the first deployment. Vite uses `/graption/` for production and local development.

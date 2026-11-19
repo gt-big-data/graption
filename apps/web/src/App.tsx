@@ -20,10 +20,14 @@ const speakerColor = (id: string) => {
 const speakerLabel = (id: string) => /^f[1-9][0-9]*$/.test(id) ? `Speaker ${id.slice(1)}` : 'Unknown speaker';
 const title = (session: Session) => session.title || `Meeting ${new Date(session.started_at).toLocaleString()}`;
 const time = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
+const pairingTokenKey = 'graption-paired-token';
 
 export default function App() {
-  const [serverToken, setServerToken] = useState('');
+  const [serverToken, setServerToken] = useState(() => window.localStorage?.getItem(pairingTokenKey) ?? '');
   const [serverStatus, setServerStatus] = useState('');
+  const [pairingQR, setPairingQR] = useState('');
+  const [pairingError, setPairingError] = useState('');
+  const [creatingPairing, setCreatingPairing] = useState(false);
   const [serverSessions, setServerSessions] = useState<Map<string, Session>>(new Map());
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -36,6 +40,26 @@ export default function App() {
     element?.focus();
   }, [selected, target]);
   const [errors, setErrors] = useState<string[]>([]);
+  async function showPairing() {
+    setCreatingPairing(true);
+    setPairingQR('');
+    setPairingError('');
+    try {
+      const response = await fetch('/api/pairing', { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok || typeof data.qr !== 'string' || typeof data.token !== 'string') {
+        throw new Error(typeof data.detail === 'string' ? data.detail : 'Open the dashboard on the Mac to pair.');
+      }
+      setServerToken(data.token);
+      window.localStorage?.setItem(pairingTokenKey, data.token);
+      setPairingQR(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(data.qr)}`);
+    } catch (error) {
+      setPairingError(error instanceof Error && !(error instanceof SyntaxError)
+        ? error.message : 'Open the dashboard on the Mac to pair.');
+    } finally {
+      setCreatingPairing(false);
+    }
+  }
   async function load(files: FileList | File[]) {
     const incoming: Session[] = [];
     const failures: string[] = [];
@@ -80,7 +104,27 @@ export default function App() {
   const session = sessions.find(item => item.id === selected);
   const results = searchMeetings(sessions, query);
   return <main><header><h1>Graption meetings</h1><p>Open local exports or load meetings synced from your iPhone.</p></header>
-    <section aria-label="Server meetings"><h2>Synced meetings</h2><label htmlFor="server-token">Server token (if required)</label><input id="server-token" type="password" value={serverToken} onChange={event => setServerToken(event.target.value)} autoComplete="off" /><button onClick={() => void loadServer()}>Load / refresh from server</button><p aria-live="polite">{serverStatus}</p></section>
+    <section aria-label="Server meetings">
+      <h2>Synced meetings</h2>
+      <div className="server-actions">
+        <button disabled={creatingPairing} onClick={() => void showPairing()}>
+          {pairingQR ? 'Show a new QR code' : 'Pair an iPhone or iPad'}
+        </button>
+        <button onClick={() => void loadServer()}>Load / refresh from server</button>
+      </div>
+      {pairingQR && <div className="pairing-code">
+        <p>On your iPhone or iPad, open Graption → Connection &amp; Preferences → Scan pairing code.</p>
+        <img src={pairingQR} width={224} height={224} alt="Graption device pairing QR code" />
+        <p>Use this code once within two minutes. Keep both devices on the same network.</p>
+      </div>}
+      {pairingError && <p role="alert">{pairingError}</p>}
+      <details>
+        <summary>Manual server access</summary>
+        <label htmlFor="server-token">Server token (if required)</label>
+        <input id="server-token" type="password" value={serverToken} onChange={event => setServerToken(event.target.value)} autoComplete="off" />
+      </details>
+      <p aria-live="polite">{serverStatus}</p>
+    </section>
     <section aria-label="Search meetings"><label htmlFor="search">Search all meetings</label><input id="search" type="search" value={query} onChange={event => setQuery(event.target.value)} /><p role="status" aria-live="polite">{query.trim() ? `${results.length} results` : ''}</p>{query.trim() && <ul className="meetings">{results.map(({ session: meeting, caption }) => <li key={`${meeting.id}-${caption.caption_id}`}><button onClick={() => { setSelected(meeting.id); setTarget(caption.caption_id); }}><strong>{title(meeting)}</strong><span>{caption.text}</span></button></li>)}</ul>}</section>
     {session ? <section><button onClick={() => setSelected(null)}>← Back to meetings</button><h2>{title(session)}</h2><p>{new Date(session.started_at).toLocaleString()}</p>
       {serverSessions.get(session.id) === session && session.captions.length > 0 &&

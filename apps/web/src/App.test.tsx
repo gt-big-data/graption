@@ -90,3 +90,27 @@ test('generates a summary and asks a transcript question for a synced meeting', 
     body: JSON.stringify({ question: 'Who spoke?' }),
   });
 });
+
+test('shows a pairing QR and restores dashboard access after reopening', async () => {
+  const storage = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+  });
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ qr: '<svg/>', token: 'paired-token' }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ...example, sessions: [] }) });
+  vi.stubGlobal('fetch', fetcher);
+  const page = render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: 'Pair an iPhone or iPad' }));
+  const qr = await screen.findByRole('img', { name: 'Graption device pairing QR code' });
+  expect(qr).toHaveAttribute('src', expect.stringContaining('data:image/svg+xml'));
+  expect(fetcher).toHaveBeenCalledWith('/api/pairing', { method: 'POST' });
+  page.unmount();
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: /refresh from server/i }));
+  expect(fetcher).toHaveBeenLastCalledWith('/api/meetings', {
+    headers: { Authorization: 'Bearer paired-token' },
+  });
+  expect(await screen.findByText('Loaded 0 saved meetings')).toBeInTheDocument();
+});

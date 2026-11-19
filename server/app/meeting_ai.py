@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import Field
 
 from app.meetings import Record, authorize, get_meeting
+from app.pairing import server_token
 
 router = APIRouter()
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -38,9 +39,9 @@ def ask_meeting(
     authorize(authorization)
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     model = os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL).strip()
-    if not api_key or not os.getenv("TONE_TOKEN"):
+    if not api_key or not server_token():
         raise HTTPException(
-            503, "Meeting AI requires OPENROUTER_API_KEY and TONE_TOKEN on the Mac."
+            503, "Set OPENROUTER_API_KEY on the Mac and pair from the local dashboard."
         )
     if "/" not in model or model.lower().startswith(("openai/", "openrouter/")):
         raise HTTPException(503, "Choose a specific non-OpenAI model in OPENROUTER_MODEL.")

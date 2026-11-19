@@ -13,6 +13,7 @@ from app.asr_ws import router as asr_router
 from app.meeting_ai import router as meeting_ai_router
 from app.meetings import router as meetings_router
 from app.observability import close_logging, configure_logging, record
+from app.pairing import router as pairing_router
 from app.tone import create_backend
 from app.ws import router
 
@@ -43,6 +44,7 @@ def create_app(*, verbose: bool = False) -> FastAPI:
     app.include_router(asr_router)
     app.include_router(meetings_router)
     app.include_router(meeting_ai_router)
+    app.include_router(pairing_router)
     app.add_api_route("/health", health, response_class=PlainTextResponse)
     dashboard = Path(__file__).resolve().parents[2] / "apps/web/dist"
     if dashboard.is_dir():

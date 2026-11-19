@@ -7,6 +7,7 @@
 *.pem
 *.p12
 *.mobileprovision
+*.pairing-token
 service-account*.json
 
 # --- Data, datasets, weights, recordings (live in the shared Drive / W&B) ---

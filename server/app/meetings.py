@@ -12,6 +12,8 @@ from uuid import UUID
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.pairing import server_token
+
 router = APIRouter()
 Seconds = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
@@ -100,7 +102,7 @@ class Export(Record):
 
 
 def authorize(authorization: str | None):
-    token = os.getenv("TONE_TOKEN", "")
+    token = server_token()
     if (os.getenv("DEPLOY_MODE", "local") != "local" and not token) or (
         token and not compare_digest((authorization or "").encode(), f"Bearer {token}".encode())
     ):
