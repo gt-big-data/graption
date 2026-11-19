@@ -130,21 +130,15 @@ in the app sandbox, excludes it from backups, and uses complete file protection 
 It accepts only transcript records; it has no audio/video field or raw-event save API.
 History is newest-first. Corrupt/unsupported files surface a load error.
 
-### Manual acceptance test (simulator or iPhone)
+### Manual acceptance test (iPhone or iPad)
 
-1. Run the **Debug** scheme from Xcode. No tone server, microphone, or models are needed.
-2. Open **Saved sessions**, then tap **Start Fake Session**. Expect three captions from `f1`, `f2`, and **Someone**;
-   the first has tone `happy`, the others have no tone. The fake times run from 0 to 7 seconds.
-3. Tap **End Session & Save**. A session with **3 captions** appears under Saved sessions.
-4. Open it and verify all text, speakers, tone, and start/end times.
-5. Stop the app in Xcode or force-quit it in the app switcher. Launch it again without
-   uninstalling it or resetting simulator data. The saved session should appear automatically.
-6. Open the same transcript and verify the same three captions. Tap **Reload Saved Sessions**
-   to exercise a fresh disk read. Repeat with another fake session; both should remain.
-7. Repeat in airplane mode to confirm storage is fully offline.
+1. Open **Live captions** with the on-device model installed. Tap the microphone icon and
+   speak a few sentences after calibration.
+2. Tap **Save captions** once the captions appear, then stop transcribing.
+3. Open **Saved sessions** from Home and verify the transcript.
+4. Relaunch the app and open the same transcript. Tap **Reload Saved Sessions** to test
+   a fresh disk read. Repeat in airplane mode to verify offline storage.
 
-The fake-session demo is Debug-only. Live caption capture remains independent and does not
-save a caption session yet. Force-quitting an active, unended session does not save it.
 Uninstalling the app removes its locally saved sessions.
 
 ### Automated verification

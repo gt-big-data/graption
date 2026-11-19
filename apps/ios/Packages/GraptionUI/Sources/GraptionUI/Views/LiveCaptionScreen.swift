@@ -108,10 +108,12 @@ public struct LiveCaptionScreen: View {
 
                 videoArea
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                if usesLiveAudio {
-                    transcriptionControls
-                }
+                    .overlay(alignment: .topLeading) {
+                        if let onMicrophone {
+                            transcriptionControls(onMicrophone: onMicrophone)
+                                .padding(16)
+                        }
+                    }
 
                 if onSetup != nil || onCalibrate != nil {
                     preparationRow
@@ -200,36 +202,50 @@ public struct LiveCaptionScreen: View {
         }
     }
 
-    private var transcriptionControls: some View {
-        VStack(spacing: 10) {
-            Button(action: { onMicrophone?() }) {
-                Label(isListening ? "Stop transcribing" : "Start transcribing",
-                    systemImage: isListening ? "stop.fill" : "mic.fill")
-                    .frame(maxWidth: .infinity, minHeight: 44)
-            }
-            .disabled(!isListening && !canListen)
-
-            if let onSaveCaptions {
-                Button(action: onSaveCaptions) {
-                    Label("Save captions", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity, minHeight: 44)
+    private func transcriptionControls(onMicrophone: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button(action: onMicrophone) {
+                    cameraControlIcon(isListening ? "stop.fill" : "mic.fill")
+                        .foregroundStyle(isListening ? Color.graptionPeach : .white)
                 }
-                .disabled(!canSaveCaptions)
+                .accessibilityLabel(isListening ? "Stop transcribing" : "Start transcribing")
+                .opacity(isListening || canListen ? 1 : 0.45)
+                .disabled(!isListening && !canListen)
+
+                if let onSaveCaptions {
+                    Button(action: onSaveCaptions) {
+                        cameraControlIcon("square.and.arrow.down")
+                    }
+                    .accessibilityLabel("Save captions")
+                    .opacity(canSaveCaptions ? 1 : 0.45)
+                    .disabled(!canSaveCaptions)
+                }
             }
 
             if let statusText {
                 Text(statusText)
                     .font(.footnote)
-                    .foregroundStyle(Color.graptionSecondaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                     .accessibilityAddTraits(.updatesFrequently)
             }
         }
-        .buttonStyle(.borderedProminent)
-        .tint(Color.graptionAccent)
-        .foregroundStyle(.black)
-        .padding(16)
-        .background(Color.graptionBackground)
+        .frame(maxWidth: 200, alignment: .leading)
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .environment(\.colorScheme, .dark)
+    }
+
+    private func cameraControlIcon(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 17, weight: .semibold))
+            .frame(width: 44, height: 44)
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1))
+            .contentShape(Circle())
     }
 
     private var preparationRow: some View {
