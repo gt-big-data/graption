@@ -20,21 +20,14 @@ struct HomeScreen: View {
                         // Brand header
                         HStack {
                             HStack(spacing: 12) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.graptionAccent, lineWidth: 1)
-                                        .background(Color.white.opacity(0.08))
-
-                                    Text("G")
-                                        .font(.system(size: 18, weight: .bold))
-                                        .foregroundStyle(Color.graptionAccent)
-                                }
-                                .frame(width: 40, height: 40)
+                                GraptionLogo()
+                                    .frame(width: 44, height: 44)
 
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Graption")
+                                    Text("GRAPTION")
                                         .font(.system(size: 20, weight: .semibold))
-                                        .foregroundStyle(Color.graptionAccent)
+                                        .tracking(4)
+                                        .foregroundStyle(Color.graptionSecondaryText)
 
                                     Text("Home")
                                         .font(.system(size: 13, weight: .regular))
@@ -95,7 +88,7 @@ struct HomeScreen: View {
                                         .foregroundStyle(Color.graptionBackground)
                                         .frame(maxWidth: .infinity)
                                         .frame(height: 52)
-                                        .background(Color.graptionAccent)
+                                        .background(Color.graptionPeach)
                                         .cornerRadius(14)
                                 }
 

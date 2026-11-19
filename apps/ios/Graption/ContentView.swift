@@ -562,27 +562,33 @@ private struct InstallBaseEnPage: View {
 
     var body: some View {
         ZStack {
-            Color(red: 11 / 255, green: 31 / 255, blue: 59 / 255)
+            Color.graptionBackground
                 .ignoresSafeArea()
             VStack(spacing: 20) {
+                GraptionLogo()
+                    .frame(width: 88, height: 88)
+                    .padding(.bottom, 8)
                 Text("Install base.en")
                     .font(.largeTitle.bold())
-                    .foregroundStyle(Color(red: 1, green: 149 / 255, blue: 0))
+                    .foregroundStyle(Color.graptionAccent)
                 Text("Wi-Fi is needed")
                     .font(.title3)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.graptionSecondaryText)
                 if let detail, detail != "Wi-Fi is needed" {
                     Text(detail)
                         .font(.body)
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(Color.graptionAccent.opacity(0.8))
                 }
-                Button(isInstalling ? "Installing…" : "Install") {
+                Button {
                     install()
+                } label: {
+                    Text(isInstalling ? "Installing…" : "Install")
+                        .foregroundStyle(Color.graptionBackground)
                 }
                 .disabled(isInstalling)
                 .buttonStyle(.borderedProminent)
-                .tint(Color(red: 1, green: 149 / 255, blue: 0))
+                .tint(Color.graptionPeach)
             }
             .padding(32)
         }

@@ -7,6 +7,8 @@ public struct LiveCaptionScreen: View {
     @State private var showSettings = false
     @State private var showControlsMenu = false
     @State private var pendingMenuAction: MenuAction?
+    /// Compact on a landscape iPhone.
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     private enum MenuAction {
         case transcript, microphone, settings, home
@@ -72,6 +74,14 @@ public struct LiveCaptionScreen: View {
 
     private var displayedCaptions: [LiveCaption] {
         suppliedCaptions ?? simulator.captions
+    }
+
+    private var isLandscape: Bool { verticalSizeClass == .compact }
+
+    /// Landscape leaves little height, so it keeps the two newest captions
+    /// (captions arrive oldest first) to keep faces in view.
+    private var onScreenCaptions: [LiveCaption] {
+        isLandscape ? Array(displayedCaptions.suffix(2)) : displayedCaptions
     }
 
     private var displayedAlert: SoundAlert? {
@@ -174,15 +184,18 @@ public struct LiveCaptionScreen: View {
             }
 
             if !displayedCaptions.isEmpty && cameraPreviewDestination != nil {
+                // In landscape, a centered column like meeting subtitles,
+                // narrow enough to leave the people on either side visible.
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(displayedCaptions) { caption in
+                    ForEach(onScreenCaptions) { caption in
                         CaptionBubbleView(caption: caption)
                             .transition(.opacity)
                     }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .animation(.easeOut(duration: 0.3), value: displayedCaptions.map(\.id))
+                .frame(maxWidth: isLandscape ? 560 : .infinity, alignment: .leading)
+                .padding(isLandscape ? 8 : 12)
+                .frame(maxWidth: .infinity, alignment: isLandscape ? .center : .leading)
+                .animation(.easeOut(duration: 0.3), value: onScreenCaptions.map(\.id))
             }
         }
     }
@@ -374,6 +387,16 @@ public struct LiveCaptionScreen: View {
 
 #Preview {
     LiveCaptionScreen()
+}
+
+#Preview("Landscape", traits: .landscapeLeft) {
+    LiveCaptionScreen(
+        cameraPreviewDestination: { AnyView(Color.gray) },
+        captions: [
+            LiveCaption(speakerName: "Someone", text: "Can everyone see the slides on their end?"),
+            LiveCaption(speakerName: "Someone", text: "Yes, we can see them. Go ahead whenever you're ready."),
+        ]
+    )
 }
 
 #Preview("Accessibility XXXL") {
