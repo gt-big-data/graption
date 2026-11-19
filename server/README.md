@@ -234,6 +234,24 @@ The dashboard displays numbered speakers with the same ID-based colors as the ph
 plus sound alerts and expandable tone details. Refresh replaces its previous server
 snapshot so deleted meetings disappear. Separately exported files remain unchanged.
 
-Speaker attribution uses a provisional mouth-motion heuristic, not a trained model.
-Summaries and per-user access controls remain separate work. Sync resumes while the
-app is active; it does not upload while iOS has suspended the app.
+Speaker attribution uses a provisional mouth-motion heuristic. Sync resumes while the
+app is active.
+
+### Optional meeting AI (OpenRouter)
+
+Put `OPENROUTER_API_KEY` and `TONE_TOKEN` in the gitignored **repository-root
+`.env`** on the Mac. Use the same `TONE_TOKEN` for the dashboard and the iOS
+configuration. The default model is `google/gemma-3-27b-it:free`.
+`OPENROUTER_MODEL` selects another explicit non-OpenAI model.
+
+After building the dashboard, start or restart the Mac server from the repo root.
+
+```bash
+uv run --directory server --env-file ../.env uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+In `/graption/`, enter the server token, load synced meetings, and open one with
+captions. **Generate summary** and **Ask** send the selected transcript text,
+speaker IDs and timestamps to OpenRouter on demand. The app requests providers
+with data collection disabled. Answers stay in browser memory. Each question
+uses the transcript as context. Standalone JSON imports remain available offline.

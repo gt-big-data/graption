@@ -4,4 +4,6 @@ Run `npm ci`, then `npm run dev` and open the printed local address. Choose or d
 
 Search finds captions across all loaded meetings, ignoring case and accents. Select a result to open its transcript and focus the highlighted caption.
 
+Synced meetings on the Mac dashboard support an optional AI summary and transcript questions. The Mac holds the OpenRouter key. See [Mac server setup](../../server/README.md#optional-meeting-ai-openrouter).
+
 The Web dashboard workflow checks generated types, lint, typecheck, tests and the production build. Merges to main deploy to https://gt-big-data.github.io/graption/. A repository admin must select **Settings → Pages → Source → GitHub Actions** before the first deployment. Vite uses `/graption/` for production and local development.

@@ -13,6 +13,7 @@ test('loads exports and opens a transcript with speaker and tone', async () => {
   fireEvent.click(screen.getAllByRole('button', { name: /captions/i })[1]);
   expect(screen.getByText('Speaker 1')).toBeInTheDocument();
   expect(screen.getByText('Tone: happy')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Generate summary' })).not.toBeInTheDocument();
   expect(screen.getByText(example.sessions[0].captions[0].text)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /back to meetings/i }));
   fireEvent.click(screen.getAllByRole('button', { name: /captions/i })[0]);
@@ -65,4 +66,27 @@ test('server refresh updates titles, exposes saved details and removes deleted m
   fireEvent.click(screen.getByRole('button', { name: /back to meetings/i }));
   fireEvent.click(screen.getByRole('button', { name: /refresh from server/i }));
   await waitFor(() => expect(screen.queryByRole('button', { name: /Planning/ })).not.toBeInTheDocument());
+});
+
+test('generates a summary and asks a transcript question for a synced meeting', async () => {
+  const meeting = { ...example.sessions[0], title: 'Planning' };
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ...example, sessions: [meeting] }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ answer: 'Summary from OpenRouter' }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ answer: 'Answer from OpenRouter' }) });
+  vi.stubGlobal('fetch', fetcher);
+  render(<App />);
+  fireEvent.change(screen.getByLabelText(/server token/i), { target: { value: 'test-token' } });
+  fireEvent.click(screen.getByRole('button', { name: /refresh from server/i }));
+  fireEvent.click(await screen.findByRole('button', { name: /Planning/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Generate summary' }));
+  expect(await screen.findByText('Summary from OpenRouter')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Ask about this transcript'), { target: { value: 'Who spoke?' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+  expect(await screen.findByText('Answer from OpenRouter')).toBeInTheDocument();
+  expect(fetcher).toHaveBeenLastCalledWith(`/api/meetings/${meeting.id}/ai`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
+    body: JSON.stringify({ question: 'Who spoke?' }),
+  });
 });

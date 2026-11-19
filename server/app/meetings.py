@@ -117,6 +117,20 @@ def database():
     return connection
 
 
+def get_meeting(meeting_id: UUID) -> Meeting:
+    connection = database()
+    try:
+        row = connection.execute(
+            "SELECT body FROM meetings WHERE id = ?", (str(meeting_id),)
+        ).fetchone()
+    finally:
+        connection.close()
+    meeting = Meeting.model_validate_json(row[0]) if row else None
+    if meeting is None or meeting.deleted_at is not None:
+        raise HTTPException(404, "Meeting not found")
+    return meeting
+
+
 @router.post("/api/meetings")
 def save_meetings(export: Export, authorization: str | None = Header(default=None)):
     authorize(authorization)

@@ -16,10 +16,11 @@ Example output:
 
 ### Hard constraints
 - **Minimal budget.** Requested: Apple Developer Program ($99), OpenAI API credits ($50), cloud credits ($100). Build everything so it works **without** them; they only unlock user testing and benchmarking.
-- **Dev-first.** The core is a local dev setup. The only cloud piece is an optional hosted tone server for remote user testing.
+- **Dev-first.** The core is a local dev setup. The tone server is the only Graption
+  service hosted in the cloud. The optional Mac dashboard can call OpenRouter for meeting AI.
 - **iOS only.** No Android.
 - **Training compute:** the team's M-series Macs (PyTorch on `mps`). Training is never part of the live app.
-- **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi (tone model only).
+- **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi for optional tone and ASR.
 - **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network. Tone may depend on a server; optional Mac ASR must fall back to on-device WhisperKit.
 - **User testing:** DHH testers use the app on their own phones at home via TestFlight. Their phones can't reach the dev Mac, which is why the tone server must also run in the cloud (or behind a tunnel).
 
@@ -451,7 +452,7 @@ The web dashboard reads local exports in memory or loads synced meetings from th
   This is a shared development server, with no per-user accounts or isolation. Use persistent
   storage for the database; ephemeral cloud disks cannot guarantee retention.
 - Build `apps/web` before starting the server to serve the dashboard at `/graption/`.
-  During web development Vite proxies `/api` to localhost:8000. Summaries remain later work.
+  During web development Vite proxies `/api` to localhost:8000.
 
 
 **Debug mode**
@@ -612,6 +613,11 @@ The mapping is `EMOTION_TAGS` in `server/app/tone.py`, applied by `emotion_tag` 
 ## 10. AI summaries and notes (Platform team, non-blocking)
 
 **Feature:** a post-session "catch me up" summary/notes built from the caption log (speaker + text + tone), shown in the past-meetings dashboard (section 6).
+- **Mac dashboard:** a synced meeting supports an on-demand summary and transcript questions
+  through OpenRouter. The Mac holds `OPENROUTER_API_KEY` and requires `TONE_TOKEN` for AI
+  requests. Only the caption text, speaker IDs, timestamps and the requested question leave
+  the Mac for inference. Replies stay in browser memory. iOS capture and offline transcript
+  viewing are independent of this service.
 - **Target:** Apple Foundation Models on-device (iOS 26+, Apple Intelligence devices). Free and offline. Use `@Generable` for structured output.
 - **Benchmark:** OpenAI API (a small, cheap model) run from Python scripts in `language/`, on exported caption logs. It sets the quality bar that the on-device version is measured against.
   - **Never** call OpenAI from the iOS app; the API key would ship inside the app.

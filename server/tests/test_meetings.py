@@ -1,6 +1,7 @@
 """Durable idempotent text-only meeting sync and dashboard contract."""
 
 import json
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
@@ -8,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator, FormatChecker
 
+from app import meeting_ai
 from app.main import create_app
 
 
@@ -149,3 +151,43 @@ def test_invalid_probabilities_and_sound_times_are_rejected(client):
         }
     ]
     assert client.post("/api/meetings", json=data).status_code == 422
+
+
+def test_meeting_ai_uses_only_selected_transcript(client, monkeypatch):
+    data = export()
+    meeting = data["sessions"][0]
+    other = export()["sessions"][0]
+    other["captions"][0]["text"] = "Another meeting"
+    data["sessions"].append(other)
+    assert client.post("/api/meetings", json=data).status_code == 200
+    endpoint = f"/api/meetings/{meeting['id']}/ai"
+    monkeypatch.setenv("OPENROUTER_API_KEY", "mock-openrouter-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "google/mock-model")
+    assert client.post(endpoint, json={}).status_code == 503
+    monkeypatch.setenv("TONE_TOKEN", "test-token")
+    assert client.post(endpoint, json={}).status_code == 401
+    headers = {"Authorization": "Bearer test-token"}
+    requests = []
+
+    def complete(request, timeout):
+        assert request.full_url == meeting_ai.OPENROUTER_URL
+        assert request.get_header("Authorization") == "Bearer mock-openrouter-key"
+        assert timeout == 30
+        requests.append(json.loads(request.data))
+        return BytesIO(b'{"choices":[{"message":{"content":"A meeting answer."}}]}')
+
+    monkeypatch.setattr(meeting_ai, "urlopen", complete)
+    for body in ({}, {"question": "What did they say?"}):
+        assert client.post(endpoint, json=body, headers=headers).json() == {
+            "answer": "A meeting answer."
+        }
+    summary, question = (payload["messages"][1]["content"] for payload in requests)
+    assert "Summarize the meeting" in summary
+    assert "What did they say?" in question
+    for content in (summary, question):
+        assert "[00:00] unknown: Hello" in content
+        assert "Another meeting" not in content
+    meeting["deleted_at"] = "2026-11-16T12:00:00Z"
+    assert client.post("/api/meetings", json=data, headers=headers).status_code == 200
+    assert client.post(endpoint, json={}, headers=headers).status_code == 404
+    assert len(requests) == 2
