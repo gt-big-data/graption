@@ -16,6 +16,7 @@ from app.main import create_app
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
+    monkeypatch.setattr(meeting_ai, "ENV_FILE", tmp_path / ".env")
     monkeypatch.setenv("MEETINGS_DB", str(tmp_path / "meetings.sqlite3"))
     monkeypatch.setenv("DEPLOY_MODE", "local")
     monkeypatch.delenv("TONE_TOKEN", raising=False)
@@ -162,8 +163,11 @@ def test_meeting_ai_uses_only_selected_transcript(client, monkeypatch):
     data["sessions"].append(other)
     assert client.post("/api/meetings", json=data).status_code == 200
     endpoint = f"/api/meetings/{meeting['id']}/ai"
-    monkeypatch.setenv("OPENROUTER_API_KEY", "mock-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_MODEL", "google/mock-model")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "stale-shell-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "stale/shell-model")
+    meeting_ai.ENV_FILE.write_text(
+        'OPENROUTER_API_KEY="mock-openrouter-key"\nOPENROUTER_MODEL=google/mock-model\n'
+    )
     assert client.post(endpoint, json={}).status_code == 503
     monkeypatch.setenv("TONE_TOKEN", "test-token")
     assert client.post(endpoint, json={}).status_code == 401
@@ -175,6 +179,7 @@ def test_meeting_ai_uses_only_selected_transcript(client, monkeypatch):
         assert request.get_header("Authorization") == "Bearer mock-openrouter-key"
         assert timeout == 30
         requests.append(json.loads(request.data))
+        assert requests[-1]["model"] == "google/mock-model"
         return BytesIO(b'{"choices":[{"message":{"content":"A meeting answer."}}]}')
 
     monkeypatch.setattr(meeting_ai, "urlopen", complete)

@@ -678,6 +678,7 @@ source = { editable = "server" }
 dependencies = [
     { name = "fastapi" },
     { name = "pydantic-settings" },
+    { name = "python-dotenv" },
     { name = "segno" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -692,6 +693,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "mlx-whisper", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'asr'", specifier = ">=0.4.3" },
     { name = "pydantic-settings", specifier = ">=2.4" },
+    { name = "python-dotenv", specifier = ">=1.0" },
     { name = "segno", specifier = ">=1.6,<2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]

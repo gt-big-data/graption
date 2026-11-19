@@ -2,10 +2,12 @@
 
 import json
 import os
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import UUID
 
+from dotenv import dotenv_values
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import Field
 
@@ -14,6 +16,7 @@ from app.pairing import server_token
 
 router = APIRouter()
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 DEFAULT_MODEL = "google/gemma-3-27b-it:free"
 MAX_TRANSCRIPT_LENGTH = 80_000
 SYSTEM_PROMPT = (
@@ -37,8 +40,13 @@ def ask_meeting(
     meeting_id: UUID, request: MeetingAIRequest, authorization: str | None = Header(default=None)
 ):
     authorize(authorization)
-    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-    model = os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL).strip()
+    settings = dotenv_values(ENV_FILE, interpolate=False)
+    api_key = (
+        settings.get("OPENROUTER_API_KEY", os.getenv("OPENROUTER_API_KEY", "")) or ""
+    ).strip()
+    model = (
+        settings.get("OPENROUTER_MODEL", os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL)) or ""
+    ).strip()
     if not api_key or not server_token():
         raise HTTPException(
             503, "Set OPENROUTER_API_KEY on the Mac and pair from the local dashboard."

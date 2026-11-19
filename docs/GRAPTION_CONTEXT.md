@@ -626,7 +626,9 @@ The mapping is `EMOTION_TAGS` in `server/app/tone.py`, applied by `emotion_tag` 
 **Feature:** a post-session "catch me up" summary/notes built from the caption log (speaker + text + tone), shown in the past-meetings dashboard (section 6).
 - **Mac dashboard:** a synced meeting supports an on-demand summary and transcript questions
   through OpenRouter. The Mac holds `OPENROUTER_API_KEY` and requires the server bearer
-  credential for AI requests. Only the caption text, speaker IDs, timestamps and the requested question leave
+  credential for AI requests. OpenRouter settings are read from the repository-root `.env`
+  on each request, taking precedence over inherited shell variables. Environment variables
+  supply settings absent from that file. Only the caption text, speaker IDs, timestamps and the requested question leave
   the Mac for inference. Replies stay in browser memory. iOS capture and offline transcript
   viewing are independent of this service.
 - **Target:** Apple Foundation Models on-device (iOS 26+, Apple Intelligence devices). Free and offline. Use `@Generable` for structured output.
