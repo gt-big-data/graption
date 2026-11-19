@@ -2,6 +2,8 @@
 
 The tone model assigns tone tags to speech recordings. The project includes a custom 6-class emotion model (anger, disgust, fear, happy, neutral, sad) and an audEERING baseline that predicts arousal, valence, and dominance. Spec: `docs/GRAPTION_CONTEXT.md` §7, §9.
 
+Tags shown on screen are `excited`, `upset`, `calm` or none. For the custom model, happy → `excited`, anger → `upset`, and every other emotion → no tag (`EMOTION_TAGS` / `emotion_tag` in `server/app/tone.py`, table in §9).
+
 ## Project Context
 The custom model utilizes 6 emotion classes: anger, disgust, fear, happy, neutral, and sad
 The planned training pipeline uses CREMA-D with an actor disjoint 70/15/15 split and a fixed seed.

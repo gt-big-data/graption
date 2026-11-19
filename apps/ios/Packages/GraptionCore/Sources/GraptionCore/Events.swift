@@ -20,8 +20,11 @@ import Foundation
 /// Phone -> tone server. Final fused caption, for evaluation.
 ///
 /// Tone server -> phone. tag is null when not confident (a wrong tag is worse than none).
-/// Tag vocabulary depends on backend: custom = the 6 emotions minus neutral; audeering
-/// baseline = excited | upset | calm.
+/// Tags shown on screen are excited | upset | calm | null for every backend. Custom
+/// 6-emotion model: happy -> excited, anger -> upset (only when its probability is at least
+/// TAG_THRESHOLD, default 0.6, and it is the argmax); neutral, sad, fear and disgust ->
+/// null; never calm (CREMA-D has no calm clips). audeering baseline: arousal/valence
+/// thresholds (docs/GRAPTION_CONTEXT.md section 7).
 ///
 /// Tone server -> client. Malformed request rejected; connection stays open. Request is
 /// echoed only to the originating client, never stored or logged.

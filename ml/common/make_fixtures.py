@@ -2,13 +2,14 @@
 
     uv run python ml/common/make_fixtures.py
 
-Output: ml/common/fixtures/features_v1.json. GraptionVision's FeatureBuilderTests reads it and
-must reproduce every expected value. Inputs are synthetic but shaped like real MediaPipe output
-(478 landmarks, all 52 blendshapes in model order, a rotation+translation matrix), and are
+Output: ml/common/fixtures/features_v1.json (GraptionVision's FeatureBuilderTests) and
+loudness_v1.json (GraptionAudio's LoudnessTests). Swift must reproduce every expected value.
+Face inputs are synthetic but shaped like real MediaPipe output (478 landmarks, all 52
+blendshapes in model order, a rotation+translation matrix), and are
 rounded to float32 first, since that's what the iPhone gets from MediaPipe. Expected outputs
 are computed in float64 from those float32 inputs.
 
-Re-run after any change to features.py; `ml/common/tests/test_features.py` fails if the
+Re-run after any change to features.py; `ml/common/tests/test_features.py` fails if a
 committed file is stale.
 """
 
@@ -24,6 +25,13 @@ except ImportError:  # run as a plain script
     import features as F  # type: ignore[no-redef]
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "features_v1.json"
+LOUDNESS_FIXTURE_PATH = FIXTURE_PATH.parent / "loudness_v1.json"
+# Byte-identical copy bundled into GraptionAudio's tests: the iOS simulator
+# can't read the repo directly (macOS privacy protection on ~/Documents etc.).
+LOUDNESS_SWIFT_COPY_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "apps/ios/Packages/GraptionAudio/Tests/GraptionAudioTests/Fixtures/loudness_v1.json"
+)
 
 # MediaPipe's 52 blendshape categories in model output order (index 0 is "_neutral").
 ALL_BLENDSHAPES = [
@@ -153,7 +161,69 @@ def render():
     return json.dumps(build(), separators=(",", ":")) + "\n"
 
 
+# Loudness audio is generated, not stored: 34 s of noise from a 32-bit LCG (integer math, so
+# Swift reproduces it bit for bit), scaled by a float32 amplitude per segment. Segments cover
+# quiet, loud, digital silence (the -100 dB floor), and more than 30 s (the median window cap).
+LCG_MULTIPLIER = 1664525
+LCG_INCREMENT = 1013904223
+LCG_SEED = 20261111
+LOUDNESS_SEGMENTS = [  # (samples at 16 kHz, amplitude)
+    (32000, 0.01), (24000, 0.3), (8000, 0.0), (64000, 0.05),
+    (48000, 0.5), (128000, 0.02), (96000, 0.2), (144000, 0.01),
+]
+# Pushed in uneven chunks so block boundaries fall mid-chunk, as with real mic buffers.
+LOUDNESS_CHUNKS = [320, 1, 777, 2048, 160, 4096]
+
+
+def loudness_samples(segments=LOUDNESS_SEGMENTS, seed=LCG_SEED):
+    """float32 samples: amplitude * (state / 2^31 - 1), state advanced by the LCG per sample."""
+    state = seed
+    samples = []
+    for count, amplitude in segments:
+        amplitude = f32(amplitude)
+        for _ in range(count):
+            state = (LCG_MULTIPLIER * state + LCG_INCREMENT) % 2**32
+            samples.append(f32(amplitude * (state / 2**31 - 1)))
+    return samples
+
+
+def build_loudness():
+    samples = loudness_samples()
+    tracker = F.LoudnessTracker()
+    blocks, offset, chunk = [], 0, 0
+    while offset < len(samples):
+        size = LOUDNESS_CHUNKS[chunk % len(LOUDNESS_CHUNKS)]
+        blocks += tracker.push(samples[offset : offset + size])
+        offset, chunk = offset + size, chunk + 1
+    assert blocks == F.LoudnessTracker().push(samples)  # chunking never changes the result
+    seconds = len(samples) / F.LOUDNESS_SAMPLE_RATE
+    # Before the first block, exactly on block ends, between them, and after the audio.
+    frame_times = [0.0, 0.05, 1 / 15, 0.2, 29.5, 33.0, 33.0 + 1 / 30, seconds, seconds + 1]
+    return {
+        "feature_spec_version": F.FEATURE_SPEC_VERSION,
+        "sample_rate": F.LOUDNESS_SAMPLE_RATE,
+        "blocks_per_second": F.LOUDNESS_BLOCKS_PER_SECOND,
+        "history_blocks": F.LOUDNESS_HISTORY_BLOCKS,
+        "floor_dbfs": F.LOUDNESS_FLOOR_DBFS,
+        "lcg": {"multiplier": LCG_MULTIPLIER, "increment": LCG_INCREMENT, "seed": LCG_SEED},
+        "segments": [{"samples": n, "amplitude": f32(a)} for n, a in LOUDNESS_SEGMENTS],
+        "chunk_sizes": LOUDNESS_CHUNKS,
+        "sample_checksum": sum(samples),
+        "expected_end_times": [end for end, _ in blocks],
+        "expected_loudness": [value for _, value in blocks],
+        "frame_times": frame_times,
+        "expected_frame_loudness": F.loudness_for_frames(samples, frame_times),
+    }
+
+
+def render_loudness():
+    return json.dumps(build_loudness(), separators=(",", ":")) + "\n"
+
+
 if __name__ == "__main__":
     FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE_PATH.write_text(render())
     print(f"wrote {FIXTURE_PATH}")
+    for path in (LOUDNESS_FIXTURE_PATH, LOUDNESS_SWIFT_COPY_PATH):
+        path.write_text(render_loudness())
+        print(f"wrote {path}")

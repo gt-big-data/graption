@@ -13,7 +13,15 @@ from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator, FormatChecker
 
 from app.main import create_app
-from app.tone import MockToneBackend, TonePrediction, create_backend, map_tag, no_probs
+from app.tone import (
+    EMOTIONS,
+    MockToneBackend,
+    TonePrediction,
+    create_backend,
+    emotion_tag,
+    map_tag,
+    no_probs,
+)
 
 SCHEMA = json.loads(
     (Path(__file__).resolve().parents[2] / "schemas/events.schema.json").read_text()
@@ -40,6 +48,39 @@ TAGS = {"excited", "upset", "calm", None}
 )
 def test_map_tag_follows_a4_thresholds(arousal, valence, tag):
     assert map_tag(arousal, valence) == tag
+
+
+def _probs(**overrides: float) -> dict[str, float]:
+    probs = dict.fromkeys(EMOTIONS, 0.0)
+    probs.update(overrides)
+    return probs
+
+
+@pytest.mark.parametrize(
+    ("probs", "tag"),
+    [
+        (_probs(happy=0.72, neutral=0.28), "excited"),
+        (_probs(anger=0.60, disgust=0.40), "upset"),  # The threshold is inclusive.
+        (_probs(anger=0.59, disgust=0.41), None),
+        (_probs(neutral=0.90, happy=0.10), None),
+        (_probs(sad=0.80, happy=0.20), None),
+        (_probs(fear=0.80, anger=0.20), None),
+        (_probs(disgust=0.80, anger=0.20), None),
+        (no_probs(), None),
+    ],
+)
+def test_emotion_tag_maps_custom_model_to_shown_tags(probs, tag):
+    assert emotion_tag(probs) == tag
+
+
+def test_emotion_tags_are_shown_vocabulary():
+    # The custom model never emits a tag the app doesn't show, and never "calm".
+    for emotion in EMOTIONS:
+        assert emotion_tag(_probs(**{emotion: 1.0})) in TAGS - {"calm"}
+
+
+def test_emotion_tag_threshold_is_configurable():
+    assert emotion_tag(_probs(happy=0.55, sad=0.45), threshold=0.5) == "excited"
 
 
 def test_default_backend_is_mock(monkeypatch):
