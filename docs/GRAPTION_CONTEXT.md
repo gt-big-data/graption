@@ -454,6 +454,7 @@ The web dashboard reads local exports in memory or loads synced meetings from th
   This is a shared development server, with no per-user accounts or isolation. Use persistent
   storage for the database; ephemeral cloud disks cannot guarantee retention.
 - Build `apps/web` before starting the server to serve the dashboard at `/graption/`.
+  On the Mac, `http://localhost:8000/` redirects to the dashboard.
   During web development Vite proxies `/api` to localhost:8000.
 
 

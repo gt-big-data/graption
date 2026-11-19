@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.asr import create_asr_backend
@@ -47,8 +47,19 @@ def create_app(*, verbose: bool = False) -> FastAPI:
     app.include_router(pairing_router)
     app.add_api_route("/health", health, response_class=PlainTextResponse)
     dashboard = Path(__file__).resolve().parents[2] / "apps/web/dist"
-    if dashboard.is_dir():
+    dashboard_built = (dashboard / "index.html").is_file()
+    if dashboard_built:
         app.mount("/graption", StaticFiles(directory=dashboard, html=True), name="dashboard")
+
+    @app.get("/", include_in_schema=False)
+    async def dashboard_home():
+        if dashboard_built:
+            return RedirectResponse("/graption/")
+        return PlainTextResponse(
+            "From apps/web, run npm ci && npm run build, then restart Graption.",
+            status_code=503,
+        )
+
     return app
 
 
