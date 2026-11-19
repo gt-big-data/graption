@@ -2,7 +2,7 @@
 
 import json
 import os
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import UUID
 
@@ -79,6 +79,18 @@ def ask_meeting(
             answer = json.load(response)["choices"][0]["message"]["content"]
         if not isinstance(answer, str) or not answer.strip():
             raise ValueError("Empty response")
+    except HTTPError as error:
+        status, detail = {
+            401: (
+                502,
+                "OpenRouter rejected the API key. Update OPENROUTER_API_KEY and restart Graption.",
+            ),
+            402: (502, "OpenRouter reports insufficient credits for this request."),
+            403: (502, "OpenRouter denied access. Check the key and model permissions."),
+            404: (502, "OpenRouter has no available provider for this model and privacy settings."),
+            429: (429, "OpenRouter rate limit reached. Try again shortly."),
+        }.get(error.code, (502, f"OpenRouter returned HTTP {error.code}. Try again shortly."))
+        raise HTTPException(status, detail) from None
     except (URLError, TimeoutError, ValueError, TypeError, KeyError, IndexError):
         raise HTTPException(
             502, "OpenRouter could not answer. Check the Mac configuration or retry."

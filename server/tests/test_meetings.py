@@ -3,6 +3,7 @@
 import json
 from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError
 from uuid import uuid4
 
 import pytest
@@ -191,3 +192,24 @@ def test_meeting_ai_uses_only_selected_transcript(client, monkeypatch):
     assert client.post("/api/meetings", json=data, headers=headers).status_code == 200
     assert client.post(endpoint, json={}, headers=headers).status_code == 404
     assert len(requests) == 2
+
+
+def test_meeting_ai_explains_rejected_openrouter_key(client, monkeypatch):
+    data = export()
+    assert client.post("/api/meetings", json=data).status_code == 200
+    monkeypatch.setenv("TONE_TOKEN", "test-token")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "mock-invalid-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "google/mock-model")
+
+    def reject(request, timeout):
+        raise HTTPError(request.full_url, 401, "Invalid API key", None, None)
+
+    monkeypatch.setattr(meeting_ai, "urlopen", reject)
+    meeting_id = data["sessions"][0]["id"]
+    response = client.post(
+        f"/api/meetings/{meeting_id}/ai", json={}, headers={"Authorization": "Bearer test-token"}
+    )
+    assert response.status_code == 502
+    assert "OpenRouter rejected the API key" in response.json()["detail"]
+    assert "OPENROUTER_API_KEY" in response.json()["detail"]
+    assert "mock-invalid-key" not in response.text
