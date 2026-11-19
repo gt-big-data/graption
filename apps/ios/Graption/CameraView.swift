@@ -822,11 +822,14 @@ struct CameraView: View {
             if controller.status == .running {
                 Button(action: controller.flipCamera) {
                     Image(systemName: "arrow.triangle.2.circlepath.camera")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Color.graptionAccent)
                         .frame(width: 52, height: 52)
-                        .background(.black.opacity(0.45), in: Circle())
+                        .background(Color.graptionBackground, in: Circle())
+                        .overlay(Circle().strokeBorder(Color.graptionAccent, lineWidth: 1))
+                        .contentShape(Circle())
                 }
+                .buttonStyle(.plain)
                 .padding(isPresented ? .bottom : .top, isPresented ? 16 : 84)
                 .padding(.trailing, isPresented ? 16 : 18)
                 .accessibilityLabel(controller.cameraPosition == .back ? "Use selfie camera" : "Use back camera")

@@ -136,18 +136,9 @@ public struct LiveCaptionScreen: View {
 
             // Floating menu button
             Button(action: { showControlsMenu = true }) {
-                ZStack {
-                    Circle()
-                        .fill(Color.graptionBackground)
-                    Circle()
-                        .stroke(Color.graptionAccent, lineWidth: 1)
-
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Color.graptionAccent)
-                }
-                .frame(width: 56, height: 56)
+                cameraControlIcon("line.3.horizontal", size: 56, iconSize: 20)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("Controls")
             .padding(16)
 
@@ -237,19 +228,20 @@ public struct LiveCaptionScreen: View {
                 }
 
                 Button(action: onMicrophone) {
-                    cameraControlIcon(isListening ? "stop.fill" : "mic.fill")
-                        .foregroundStyle(isListening ? Color.graptionPeach : .white)
+                    cameraControlIcon(
+                        isListening ? "stop.fill" : "mic.fill",
+                        color: isListening ? .graptionPeach : .graptionAccent,
+                        enabled: isListening || canListen
+                    )
                 }
                 .accessibilityLabel(isListening ? "Stop transcribing" : "Start transcribing")
-                .opacity(isListening || canListen ? 1 : 0.45)
                 .disabled(!isListening && !canListen)
 
                 if let onSaveCaptions {
                     Button(action: onSaveCaptions) {
-                        cameraControlIcon("square.and.arrow.down")
+                        cameraControlIcon("square.and.arrow.down", enabled: canSaveCaptions)
                     }
                     .accessibilityLabel("Save captions")
-                    .opacity(canSaveCaptions ? 1 : 0.45)
                     .disabled(!canSaveCaptions)
                 }
             }
@@ -260,22 +252,28 @@ public struct LiveCaptionScreen: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .foregroundStyle(Color.graptionAccent)
+                    .background(Color.graptionBackground, in: RoundedRectangle(cornerRadius: 12))
                     .accessibilityAddTraits(.updatesFrequently)
             }
         }
         .frame(maxWidth: 200, alignment: .leading)
         .buttonStyle(.plain)
-        .foregroundStyle(.white)
-        .environment(\.colorScheme, .dark)
     }
 
-    private func cameraControlIcon(_ symbol: String) -> some View {
+    private func cameraControlIcon(
+        _ symbol: String,
+        size: CGFloat = 44,
+        iconSize: CGFloat = 17,
+        color: Color = .graptionAccent,
+        enabled: Bool = true
+    ) -> some View {
         Image(systemName: symbol)
-            .font(.system(size: 17, weight: .semibold))
-            .frame(width: 44, height: 44)
-            .background(.ultraThinMaterial, in: Circle())
-            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1))
+            .font(.system(size: iconSize, weight: .semibold))
+            .foregroundStyle(color.opacity(enabled ? 1 : 0.45))
+            .frame(width: size, height: size)
+            .background(Color.graptionBackground, in: Circle())
+            .overlay(Circle().strokeBorder(Color.graptionAccent, lineWidth: 1))
             .contentShape(Circle())
     }
 
