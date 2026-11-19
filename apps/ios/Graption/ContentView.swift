@@ -54,6 +54,7 @@ struct ContentView: View {
     @State private var captions: [CaptionEntry] = []
     /// Captions whose on-screen time is up. They leave the camera view but stay in the transcript.
     @State private var expiredCaptionIDs: Set<UUID> = []
+    @State private var deferredExpiryIDs: Set<UUID> = []
     @State private var listenTask: Task<Void, Never>?
 
     private var canListen: Bool {
@@ -83,8 +84,18 @@ struct ContentView: View {
         let seconds = Self.onScreenSeconds(for: entry.text)
         Task {
             try? await Task.sleep(for: .seconds(seconds))
-            expiredCaptionIDs.insert(id)
+            if captionRecorders[id] != nil, captions.contains(where: { $0.id == id }) {
+                deferredExpiryIDs.insert(id)
+                try? await Task.sleep(for: .seconds(30))
+                guard deferredExpiryIDs.remove(id) != nil else { return }
+            }
+            expireCaption(id)
         }
+    }
+
+    private func expireCaption(_ id: UUID) {
+        guard captions.contains(where: { $0.id == id }) else { return }
+        expiredCaptionIDs.insert(id)
     }
 
     private var bannerAlert: GraptionUI.SoundAlert? {
@@ -213,6 +224,16 @@ struct ContentView: View {
                 guard let captionID = event.captionID, let id = UUID(uuidString: captionID),
                       let owner = captionRecorders.removeValue(forKey: id) else { return }
                 toneTags[id] = event.tag
+                if deferredExpiryIDs.remove(id) != nil {
+                    if event.tag == nil {
+                        expireCaption(id)
+                    } else {
+                        Task {
+                            try? await Task.sleep(for: .seconds(2))
+                            expireCaption(id)
+                        }
+                    }
+                }
                 let modelVersion = event.modelVersion ?? "unknown"
                 toneVersions[id] = modelVersion
                 let probs = event.probs.map {
@@ -398,6 +419,7 @@ struct ContentView: View {
         toneVersions.removeAll()
         toneTags.removeAll()
         expiredCaptionIDs.removeAll()
+        deferredExpiryIDs.removeAll()
         do {
             try capture.start(calibrating: true)
         } catch {

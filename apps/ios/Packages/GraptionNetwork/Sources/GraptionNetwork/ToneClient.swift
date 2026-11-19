@@ -142,6 +142,29 @@ public actor ToneClient {
         }
     }
 
+    /// Sends one sentence and waits for its corresponding server reply. Callers that issue
+    /// several requests should serialize this method because one WebSocket receives replies
+    /// in request order.
+    public func requestTone(
+        captionID: String,
+        tStart: Double,
+        tEnd: Double,
+        sampleRate: Int,
+        pcm16: Data
+    ) async throws -> Events {
+        try await sendToneRequest(
+            captionID: captionID,
+            tStart: tStart,
+            tEnd: tEnd,
+            sampleRate: sampleRate,
+            pcm16: pcm16
+        )
+        switch try await receiveNext() {
+        case .toneResult(let event): return event
+        case .sessionError: throw ToneClientError.unexpectedMessage
+        }
+    }
+
     /// Receives the next result or recoverable server error. Other event types are rejected.
     public func receiveNext() async throws -> ToneServerEvent {
         guard let socket else { throw ToneClientError.notConnected }
