@@ -727,7 +727,7 @@ If the device is overloaded, degrade in this order:
 ## 17. Open questions
 
 - Does iOS Club have an Apple Developer team account Graption can use?
-- AVA on a Mac: download status, and how large a subset we can extract and train on locally.
+- AVA on a Mac: the 153 labeled videos are downloaded and cut (seconds 900-1800, 15 fps, 16 kHz WAV) with `ml/asd/ava_download.py`, split in 4 shards (see `ml/asd/README.md`); status of the shared-Drive upload is tracked there. Still open: how large a subset we can extract and train on locally.
 - Dashboard scope: summaries, notes, or both? Retention is user-selectable (forever/7/30/90 days).
 - Oldest iPhone on the team (for performance benchmarks), and which team devices support Apple Intelligence (for Foundation Models).
 - Budget approval outcome.
