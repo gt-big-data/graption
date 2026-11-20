@@ -13,6 +13,32 @@ final class EnergyVADTests: XCTestCase {
     private let speech = Array(repeating: Float(0.2), count: 320)
     private let silence = Array(repeating: Float(0), count: 320)
 
+    func testManualThresholdConvertsDBFSAndActivatesAtEquality() {
+        let threshold = EnergyVAD.rmsThreshold(decibels: -60)
+        XCTAssertEqual(threshold, 0.001, accuracy: 0.000001)
+        let vad = EnergyVAD(threshold: 0.1)
+        vad.setManualThreshold(-60)
+
+        // A single sample avoids floating-point accumulation around equality.
+        _ = vad.process(samples: [threshold.nextDown], tStart: 0)
+        XCTAssertNil(vad.flush())
+        _ = vad.process(samples: [threshold], tStart: 0)
+        XCTAssertNotNil(vad.flush())
+    }
+
+    func testReturningToAutoRestoresLastCalibration() throws {
+        let vad = EnergyVAD(threshold: 0.001)
+        vad.beginCalibration()
+        for index in 0..<100 {
+            _ = vad.process(samples: speech, tStart: Double(index) * 0.02)
+        }
+        let calibrated = try vad.completeCalibration()
+        vad.setManualThreshold(-60)
+        XCTAssertEqual(vad.threshold, 0.001, accuracy: 0.000001)
+        vad.setManualThreshold(nil)
+        XCTAssertEqual(vad.threshold, calibrated)
+    }
+
     func testSilenceAloneProducesNoSegments() {
         let vad = EnergyVAD(threshold: 0.1)
 

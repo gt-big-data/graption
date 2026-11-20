@@ -35,6 +35,13 @@ public final class MicrophoneCapture {
         self.loudnessMeter = loudnessMeter
     }
 
+    public var automaticThreshold: Float { vad.automaticThreshold }
+
+    public func setManualThreshold(_ decibels: Double?) {
+        guard !isCapturing else { return }
+        vad.setManualThreshold(decibels)
+    }
+
     public var currentThreshold: Float { vad.threshold }
 
     /// Stop capture and apply calibration after all queued samples have been processed.
@@ -52,7 +59,8 @@ public final class MicrophoneCapture {
     // Omitting it starts a standalone audio session clock.
     public func start(
         sessionStartHostTime: UInt64? = nil,
-        calibrating: Bool = false
+        calibrating: Bool = false,
+        previewLevel: (@MainActor @Sendable (Float) -> Void)? = nil
     ) throws {
         guard !isCapturing else { return }
 
@@ -94,8 +102,9 @@ public final class MicrophoneCapture {
                 converter: converter,
                 outputFormat: outputFormat,
                 vad: vad,
-                soundDetector: soundDetector,
-                loudnessMeter: loudnessMeter,
+                soundDetector: previewLevel == nil ? soundDetector : nil,
+                loudnessMeter: previewLevel == nil ? loudnessMeter : nil,
+                previewLevel: previewLevel,
                 sessionStartHostTime:
                     sessionStartHostTime ?? mach_absolute_time(),
                 deliver: { [weak self] segment in
@@ -237,6 +246,9 @@ private final class AudioWorker: @unchecked Sendable {
 
     private var streamStart: TimeInterval?
     private var outputSampleCount = 0
+    private let previewLevel: (@MainActor @Sendable (Float) -> Void)?
+    private var previewPeak: Float = 0
+    private var lastPreviewUpdate: UInt64 = 0
 
     init(
         converter: AVAudioConverter,
@@ -244,6 +256,7 @@ private final class AudioWorker: @unchecked Sendable {
         vad: EnergyVAD,
         soundDetector: SoundDetector?,
         loudnessMeter: LoudnessMeter?,
+        previewLevel: (@MainActor @Sendable (Float) -> Void)?,
         sessionStartHostTime: UInt64,
         deliver: @escaping @MainActor @Sendable (AudioSegment) -> Void,
         deliverAlert: @escaping @MainActor @Sendable (SoundAlert) -> Void,
@@ -255,6 +268,7 @@ private final class AudioWorker: @unchecked Sendable {
         self.soundDetector = soundDetector
         self.loudnessMeter = loudnessMeter
         self.sessionStartHostTime = sessionStartHostTime
+        self.previewLevel = previewLevel
         self.deliver = deliver
         self.reportError = reportError
 
@@ -288,7 +302,7 @@ private final class AudioWorker: @unchecked Sendable {
     func finish() {
         // Called after the engine has stopped delivering buffers.
         queue.sync {
-            if let segment = vad.flush() {
+            if previewLevel == nil, let segment = vad.flush() {
                 emit(segment)
             }
 
@@ -371,21 +385,21 @@ private final class AudioWorker: @unchecked Sendable {
 
                 outputSampleCount += samples.count
 
-                soundDetector?.process(
-                    samples: samples,
-                    tStart: timestamp
-                )
-
-                loudnessMeter?.process(
-                    samples: samples,
-                    tStart: timestamp
-                )
-
-                for segment in vad.process(
-                    samples: samples,
-                    tStart: timestamp
-                ) {
-                    emit(segment)
+                if let previewLevel {
+                    previewPeak = max(previewPeak, EnergyVAD.rms(samples))
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    if now - lastPreviewUpdate >= 100_000_000 {
+                        let peak = previewPeak
+                        previewPeak = 0
+                        lastPreviewUpdate = now
+                        DispatchQueue.main.async { previewLevel(peak) }
+                    }
+                } else {
+                    soundDetector?.process(samples: samples, tStart: timestamp)
+                    loudnessMeter?.process(samples: samples, tStart: timestamp)
+                    for segment in vad.process(samples: samples, tStart: timestamp) {
+                        emit(segment)
+                    }
                 }
             }
 

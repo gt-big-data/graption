@@ -14,16 +14,41 @@ public struct SettingsScreen: View {
     private let pairedMacName: String?
     private let onPairMac: ((String) async throws -> Void)?
 
+    private let manualThresholdDB: Binding<Double>?
+    private let manualThresholdEnabled: Binding<Bool>
+    private let micPreviewActive: Bool
+    private let micPreviewLevel: Double
+    private let micPreviewBreached: Bool
+    private let micPreviewError: String?
+    private let onToggleMicPreview: () -> Void
+    private let onStopMicPreview: () -> Void
+
     public init(
         cameraPreviewDestination: (() -> AnyView)? = nil,
         onBack: (() -> Void)? = nil,
         pairedMacName: String? = nil,
-        onPairMac: ((String) async throws -> Void)? = nil
+        onPairMac: ((String) async throws -> Void)? = nil,
+        manualThresholdDB: Binding<Double>? = nil,
+        manualThresholdEnabled: Binding<Bool> = .constant(false),
+        micPreviewActive: Bool = false,
+        micPreviewLevel: Double = 0,
+        micPreviewBreached: Bool = false,
+        micPreviewError: String? = nil,
+        onToggleMicPreview: @escaping () -> Void = {},
+        onStopMicPreview: @escaping () -> Void = {}
     ) {
         self.cameraPreviewDestination = cameraPreviewDestination
         self.onBack = onBack
         self.pairedMacName = pairedMacName
         self.onPairMac = onPairMac
+        self.manualThresholdDB = manualThresholdDB
+        self.manualThresholdEnabled = manualThresholdEnabled
+        self.micPreviewActive = micPreviewActive
+        self.micPreviewLevel = micPreviewLevel
+        self.micPreviewBreached = micPreviewBreached
+        self.micPreviewError = micPreviewError
+        self.onToggleMicPreview = onToggleMicPreview
+        self.onStopMicPreview = onStopMicPreview
     }
 
     public var body: some View {
@@ -34,6 +59,9 @@ public struct SettingsScreen: View {
                 VStack(alignment: .leading, spacing: 16) {
                     macServerCard
                     accessibilityCard
+                    if let manualThresholdDB {
+                        speechDetectionCard(threshold: manualThresholdDB)
+                    }
                     if cameraPreviewDestination != nil {
                         cameraPreviewRow
                     }
@@ -191,10 +219,77 @@ public struct SettingsScreen: View {
         }
     }
 
+    private func speechDetectionCard(threshold: Binding<Double>) -> some View {
+        SettingsCard {
+            Text("Speech Detection")
+                .font(.title3.bold())
+                .foregroundStyle(Color.graptionAccent)
+
+            Toggle("Manual threshold", isOn: manualThresholdEnabled)
+                .tint(Color.graptionAccent)
+
+            if manualThresholdEnabled.wrappedValue {
+                let decibels = threshold.wrappedValue
+                let value = "\(Int(decibels)) dBFS"
+                Slider(value: threshold, in: -60...0, step: 1) {
+                    Text("Speech threshold")
+                }
+                .tint(Color.graptionAccent)
+                .accessibilityValue(Text(value))
+                Text("Threshold: \(value)")
+                    .font(.footnote)
+
+                if micPreviewActive {
+                    micMeter(thresholdDB: decibels)
+                }
+
+                Button(micPreviewActive ? "Stop preview" : "Preview mic", action: onToggleMicPreview)
+                    .tint(Color.graptionAccent)
+
+                if let micPreviewError {
+                    Text(micPreviewError)
+                        .font(.footnote)
+                }
+
+                Text("Applies the next time you tap Listen.")
+                    .font(.footnote)
+                    .foregroundStyle(Color.graptionSecondaryText)
+            }
+        }
+    }
+
+    private func micMeter(thresholdDB: Double) -> some View {
+        let levelDB = 20 * log10(micPreviewLevel)
+        let fill = min(1, max(0, (levelDB + 60) / 60))
+        let marker = (thresholdDB + 60) / 60
+
+        return VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.graptionSecondaryText.opacity(0.25))
+                    Capsule().fill(Color.graptionAccent)
+                        .frame(width: geometry.size.width * fill)
+                    Rectangle().fill(.primary)
+                        .frame(width: 2)
+                        .offset(x: max(0, geometry.size.width - 2) * marker)
+                }
+            }
+            .frame(height: 10)
+            .accessibilityHidden(true)
+
+            Text(micPreviewBreached ? "Above threshold" : "Below threshold")
+                .font(.footnote)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Microphone level")
+        .accessibilityValue(micPreviewBreached ? "Above threshold" : "Below threshold")
+    }
+
     // Dev/debug entry point to the raw AVFoundation camera preview (not part
     // of the Figma design); only shown when the app target injects one.
     private var cameraPreviewRow: some View {
         Button {
+            onStopMicPreview()
             showCameraPreview = true
         } label: {
             HStack(spacing: 12) {

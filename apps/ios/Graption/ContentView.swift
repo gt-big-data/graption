@@ -46,6 +46,12 @@ struct ContentView: View {
     @State private var calibrationCount: Int?
     @State private var calibrationTask: Task<Bool, Never>?
     @State private var isStarting = false
+    @State private var useManualThreshold = false
+    @State private var manualThresholdDB: Double?
+    @State private var previewCapture: MicrophoneCapture?
+    @State private var previewTask: Task<Void, Never>?
+    @State private var previewLevel: Float = 0
+    @State private var previewError: String?
     @State private var isPreparing = false
     @State private var isReady = false
     @State private var status = "Loading base.en…"
@@ -114,8 +120,22 @@ struct ContentView: View {
                         showHomeScreen = true
                     },
                     pairedMacName: pairedMac?.serverURL.host,
-                    onPairMac: pairMac
+                    onPairMac: pairMac,
+                    manualThresholdDB: Binding(
+                        get: { manualThresholdDB ?? initialManualThresholdDB },
+                        set: { manualThresholdDB = $0 }
+                    ),
+                    manualThresholdEnabled: $useManualThreshold,
+                    micPreviewActive: previewCapture != nil,
+                    micPreviewLevel: Double(previewLevel),
+                    micPreviewBreached: previewLevel >= EnergyVAD.rmsThreshold(
+                        decibels: manualThresholdDB ?? initialManualThresholdDB
+                    ),
+                    micPreviewError: previewError,
+                    onToggleMicPreview: toggleMicPreview,
+                    onStopMicPreview: stopMicPreview
                 )
+                .onDisappear { stopMicPreview() }
             } else if showTranscript {
                 TranscriptScreen(
                     captions: captions.map { entry in
@@ -171,7 +191,7 @@ struct ContentView: View {
                     onHome: {
                         // Leaving live captions turns the microphone off; the
                         // screen-level .onDisappear doesn't fire for in-place swaps.
-                        if isRecording || isCalibrating { stopListening() }
+                        if isRecording || isCalibrating || isStarting { stopListening() }
                         showHomeScreen = true
                     },
                     onTranscript: {
@@ -276,7 +296,19 @@ struct ContentView: View {
                 report(error)
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { stopMicPreview() }
+        }
+        .onChange(of: useManualThreshold) { _, enabled in
+            if enabled, manualThresholdDB == nil {
+                manualThresholdDB = initialManualThresholdDB
+            } else if !enabled {
+                stopMicPreview()
+                previewError = nil
+            }
+        }
         .onDisappear {
+            stopMicPreview()
             if isRecording || isCalibrating { stopListening() }
             isVisible = false
             toneMonitor.stop()
@@ -289,6 +321,58 @@ struct ContentView: View {
             isCalibrating = false
             calibrationCount = nil
         }
+    }
+
+    private var initialManualThresholdDB: Double {
+        let rms = Double(capture?.automaticThreshold ?? 0.001)
+        return min(0, max(-60, (20 * log10(rms)).rounded()))
+    }
+
+    private func toggleMicPreview() {
+        if previewCapture != nil {
+            stopMicPreview()
+            return
+        }
+        guard !isStarting, !isRecording, !isCalibrating else {
+            previewError = "Stop listening before previewing the microphone."
+            return
+        }
+        previewError = nil
+        let preview = MicrophoneCapture(vad: EnergyVAD(threshold: 0.001))
+        previewCapture = preview
+        previewTask = Task {
+            let granted = await preview.requestPermission()
+            guard !Task.isCancelled, previewCapture === preview,
+                  showSettings, useManualThreshold, scenePhase != .background else { return }
+            guard granted else {
+                stopMicPreview()
+                previewError = "Microphone permission denied."
+                return
+            }
+            preview.onError = { [weak preview] error in
+                guard let preview, previewCapture === preview else { return }
+                stopMicPreview()
+                previewError = error.localizedDescription
+            }
+            do {
+                try preview.start(previewLevel: { [weak preview] level in
+                    guard let preview, previewCapture === preview else { return }
+                    previewLevel = level
+                })
+            } catch {
+                stopMicPreview()
+                previewError = error.localizedDescription
+            }
+        }
+    }
+
+    private func stopMicPreview() {
+        previewTask?.cancel()
+        previewTask = nil
+        let preview = previewCapture
+        previewCapture = nil
+        previewLevel = 0
+        preview?.stop()
     }
 
     private func configureCallbacks() {
@@ -428,45 +512,49 @@ struct ContentView: View {
         toneTags.removeAll()
         expiredCaptionIDs.removeAll()
         deferredExpiryIDs.removeAll()
-        do {
-            try capture.start(calibrating: true)
-        } catch {
-            report(error)
-            return
-        }
-        isCalibrating = true
-        status = "Keep the room quiet"
-        let countdown = Task { @MainActor in
-            for count in [3, 2, 1] {
-                guard !Task.isCancelled else { return false }
-                calibrationCount = count
-                do {
-                    try await Task.sleep(for: .seconds(1))
-                } catch {
-                    return false
-                }
-            }
-            return !Task.isCancelled
-        }
-        calibrationTask = countdown
-        let shouldApplyCalibration = await countdown.value
-        calibrationTask = nil
-        guard !Task.isCancelled, isVisible, isCalibrating else { return }
-        calibrationCount = nil
-        isCalibrating = false
-        if shouldApplyCalibration {
+        let manualDB = useManualThreshold ? (manualThresholdDB ?? initialManualThresholdDB) : nil
+        capture.setManualThreshold(manualDB)
+        if manualDB == nil {
             do {
-                let threshold = try capture.stopCalibration()
-                print(String(format: "Calibrated RMS threshold: %.6f", threshold))
-            } catch CalibrationError.tooShort {
-                print("Calibration too short. Using the previous RMS threshold.")
+                try capture.start(calibrating: true)
             } catch {
-                capture.stop()
                 report(error)
                 return
             }
-        } else {
-            capture.stop()
+            isCalibrating = true
+            status = "Keep the room quiet"
+            let countdown = Task { @MainActor in
+                for count in [3, 2, 1] {
+                    guard !Task.isCancelled else { return false }
+                    calibrationCount = count
+                    do {
+                        try await Task.sleep(for: .seconds(1))
+                    } catch {
+                        return false
+                    }
+                }
+                return !Task.isCancelled
+            }
+            calibrationTask = countdown
+            let shouldApplyCalibration = await countdown.value
+            calibrationTask = nil
+            guard !Task.isCancelled, isVisible, isCalibrating else { return }
+            calibrationCount = nil
+            isCalibrating = false
+            if shouldApplyCalibration {
+                do {
+                    let threshold = try capture.stopCalibration()
+                    logSpeechThreshold(threshold, mode: "Calibrated")
+                } catch CalibrationError.tooShort {
+                    print("Calibration too short. Using the previous RMS threshold.")
+                } catch {
+                    capture.stop()
+                    report(error)
+                    return
+                }
+            } else {
+                capture.stop()
+            }
         }
         guard !Task.isCancelled, isVisible else { return }
         do {
@@ -490,12 +578,22 @@ struct ContentView: View {
             let hostTime = mach_absolute_time()
             cameraController.beginMeeting(at: hostTime)
             try capture.start(sessionStartHostTime: hostTime)
+            if manualDB != nil {
+                logSpeechThreshold(capture.currentThreshold, mode: "Manual")
+            }
             isRecording = true
             status = "Listening"
         } catch {
             cameraController.finishMeeting()
             report(error)
         }
+    }
+
+    private func logSpeechThreshold(_ rms: Float, mode: String) {
+        #if DEBUG
+        let decibels = 20 * log10(Double(rms))
+        print(String(format: "%@ RMS threshold: %.6f (%.1f dBFS)", mode, rms, decibels))
+        #endif
     }
 
     private func stopListening() {
