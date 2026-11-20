@@ -16,10 +16,11 @@ Example output:
 
 ### Hard constraints
 - **Minimal budget.** Requested: Apple Developer Program ($99), OpenAI API credits ($50), cloud credits ($100). Build everything so it works **without** them; they only unlock user testing and benchmarking.
-- **Dev-first.** The core is a local dev setup. The only cloud piece is an optional hosted tone server for remote user testing.
+- **Dev-first.** The core is a local dev setup. The tone server is the only Graption
+  service hosted in the cloud. The optional Mac dashboard can call OpenRouter for meeting AI.
 - **iOS only.** No Android.
 - **Training compute:** the team's M-series Macs (PyTorch on `mps`). Training is never part of the live app.
-- **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi (tone model only).
+- **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi for optional tone and ASR.
 - **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network. Tone may depend on a server; optional Mac ASR must fall back to on-device WhisperKit.
 - **User testing:** DHH testers use the app on their own phones at home via TestFlight. Their phones can't reach the dev Mac, which is why the tone server must also run in the cloud (or behind a tunnel).
 
@@ -182,7 +183,7 @@ Every event includes `type`, `session_id`, and `schema_version` (currently `"1.3
 
 **Tone server → phone:**
 ```jsonc
-{ "type":"tone_result", "caption_id":"uuid", "tag":"happy"|null,
+{ "type":"tone_result", "caption_id":"uuid", "tag":"excited"|"upset"|"calm"|null,
   "probs":{"anger":0.05,"disgust":0.02,"fear":0.03,"happy":0.72,"neutral":0.15,"sad":0.03},
   "model_version":"tone-head-v2", "latency_ms":{"recv_to_send":180} }
 ```
@@ -259,10 +260,18 @@ For now the app has two ways to get landmarks, chosen by `LandmarkMode`. **`face
 **FaceTracker** (`GraptionVision/FaceTracker.swift`, unit-tested with `swift test`)
 - Greedy IoU matching of the current frame's faces to existing tracks (IoU ≥ 0.3), then a centroid-distance fallback (within 1.5× the face size) for fast movers.
 - Boxes are smoothed with a One Euro filter. A missed face coasts on its last velocity and is still shown for 2 frames, without landmarks.
-- Drop a track after 2s unseen; until then a returning face gets its old ID back. (Was 1s; on-device testing showed turning the head away and back often takes longer, and the face came back with a new ID. Tradeoff: someone new stepping into the same spot within 2s inherits the ID.) IDs are `f1`, `f2`, … per session, never reused; they restart when the camera stops. Rotating the phone forgets all tracks (their boxes are in the old orientation), so faces get new IDs.
+- Drop a track after 2s unseen; until then a returning face gets its old ID back. (Was 1s; on-device testing showed turning the head away and back often takes longer, and the face came back with a new ID. Tradeoff: someone new stepping into the same spot within 2s inherits the ID.) IDs are `f1`, `f2`, …, never reused within the camera controller lifetime; closing a preview does not restart numbering. Rotating the phone forgets all tracks (their boxes are in the old orientation), so faces get new IDs.
 
 **Speaker guess (until SpeakerModel ships)**
-- `LargestFaceScorer` implements the `SpeakerScorer` protocol: the largest face gets `p = 1`, the rest `0`. The camera view labels that face "talking" and draws it green. The Core ML model replaces it behind the same protocol.
+- Live capture now uses `MouthMotionScorer` behind `SpeakerScorer`: per-track jaw-open,
+  funnel and pucker changes averaged over 0.6s, normalized to 15 fps; 0.2s warmup.
+  Static mouths and missing landmarks score zero. This is a provisional visual heuristic,
+  **not calibrated probability or reliable audio diarization**. Chewing, expressions and
+  silent lip movements can fool it. `LargestFaceScorer` remains a test stub, not the live scorer.
+  A trained Core ML model can replace this scorer behind the same protocol.
+- Face boxes and captions share colors keyed by tracked ID, plus numbered labels for
+  accessibility. Unknown speakers are gray. IDs are not reused when a preview closes;
+  the camera continues while a meeting is recording, including in transcript view.
 
 **FeatureBuilder** (`GraptionVision/FeatureBuilder.swift`, spec version `features-v1`)
 Must match `ml/common/features.py` exactly: same order, same normalization. `FeatureBuilderTests` (`swift test`) reproduces every value in `ml/common/fixtures/features_v1.json`, which `ml/common/make_fixtures.py` generates from the Python code; `ml/common/tests/` fails if that file is stale. It produces one vector per face per frame, in this **locked order**:
@@ -272,7 +281,7 @@ Must match `ml/common/features.py` exactly: same order, same normalization. `Fea
 | 0–79 | Lip landmarks | 80 | MediaPipe `FACEMESH_LIPS` indices (40 pts, sorted ascending) × (x, y), interleaved x0, y0, x1, y1, …. Converted to pixels (x·width, y·height, so aspect ratio doesn't matter), minus the nose tip (landmark 1), divided by the inter-ocular distance (iris centers 468 and 473, so the 478-point mesh is required) |
 | 80–91 | Mouth blendshapes | 12 | `jawOpen, mouthClose, mouthFunnel, mouthPucker, mouthLowerDownLeft, mouthLowerDownRight, mouthUpperUpLeft, mouthUpperUpRight, mouthStretchLeft, mouthStretchRight, mouthRollLower, mouthRollUpper`, looked up by category name |
 | 92–94 | Head pose | 3 | yaw, pitch, roll (radians) from the transformation matrix's rotation, R = Ry(yaw)·Rx(pitch)·Rz(roll): yaw = atan2(r02, r22), pitch = asin(−r12), roll = atan2(r10, r11), indices row-major |
-| 95 | Loudness | 1 | RMS dBFS of mic audio over the frame's ~67 ms, minus the session's rolling 30s median. Computed by the audio side and passed in (not yet implemented on either side) |
+| 95 | Loudness | 1 | RMS dBFS of the last 1/15 s of mic audio, minus the median of the past 30 s. Past audio only. Exact rule under **Loudness** below; computed by the audio side (`LoudnessTracker` in `features.py`, `LoudnessMeter` in GraptionAudio) and passed in |
 | | **Total** | **96** | Plus a per-face ring buffer of the last 15 frames, giving model input `[1, 15, 96]` |
 
 Math is float64 on both sides; the phone hands Core ML float32. The vectors aren't computed in the live app yet (no SpeakerModel or loudness to consume them); `FeatureHistories.update(with:frameSize:loudness:)` is the per-frame entry point when they are.
@@ -300,6 +309,16 @@ Math is float64 on both sides; the phone hands Core ML float32. The vectors aren
 - **Loudness, position 95.**
 - **Other fixed numbers:** window 15 frames at 15 fps (`[1, 15, 96]`); missing landmarks held at most 2 frames; face crop 2.2× the face, resized to 256×256; Python/Swift parity tolerance 1e-6 (float32) and 1e-12 (float64).
 
+**Loudness** (position 95; `ml/common/features.py` `LoudnessTracker`, `GraptionAudio/Loudness.swift` `LoudnessMeter`)
+- Input: the 16 kHz mono float32 mic stream (the phone's converted stream; AVA's extracted 16 kHz audio in training).
+- **Blocks:** back-to-back blocks of 1/15 s. Block *k* is samples `k·16000 // 15` up to (not including) `(k+1)·16000 // 15`, so sizes alternate 1066/1067 and there are exactly 15 per second, with no drift.
+- **Level:** each block's RMS in dBFS (full scale 1.0), `20·log10(rms)`. RMS ≤ 1e-5 (digital silence) is floored at −100 dB instead of −∞.
+- **Loudness:** the block's level minus the **median** level of the last 30 s of blocks (450, including this one). In the first 30 s it uses however many blocks exist; the very first block is therefore 0.
+- **Per frame:** a camera frame at time *t* uses the newest block that **ended at or before *t***. That is only past audio, as on the phone: future audio never changes an earlier frame. Before the first block ends, loudness is 0. In training (AVA at 15 fps), frame *k* at *k*/15 s uses block *k*−1, the 1/15 s just before it.
+- Times are seconds from the audio stream's first sample (Python), or session time (phone: stream start + samples/16000). On the phone, a gap in the audio (capture restarted after an error) starts loudness over, since the block grid no longer lines up.
+- Math is float64 over float32 samples, summed in order. `LoudnessTests` (GraptionAudio, run on the simulator with `xcodebuild test`) reproduces every value in `ml/common/fixtures/loudness_v1.json` (bundled as a copy, since the simulator cannot read the repo; pytest checks the copy matches): 34 s of generated audio (an integer noise generator, so both sides make identical samples) covering quiet, loud, silence, and more than 30 s. Python and Swift agree to within 1e-9 dB.
+- The live app doesn't build feature vectors yet. When it does, create one `LoudnessMeter`, pass it to `MicrophoneCapture(…, loudnessMeter:)`, and call `meter.loudness(at: frameTime)` for `FeatureHistories.update(…, loudness:)`.
+
 **Missing landmarks** (`FeatureHistory`, same rule in `features.py`; training uses it via `windows_from_track`)
 - A frame counts as *missing* when a tracked face has no landmarks (a coasting face or a MediaPipe miss), no blendshapes/matrix, or a mesh the builder rejects (fewer than 478 points, zero inter-ocular distance, a blendshape absent).
 - **Rule: repeat the last good frame, for at most 2 frames in a row.** A missing frame appends the last good frame's 95 face values with *this* frame's loudness. A 3rd consecutive miss, or a miss before any good frame, **starts that face's 15-frame history over**. 2 matches `FaceTracker.maxCoastFrames` (~133 ms at 15 fps): a blip doesn't cost a second of predictions, but stale lips are never fed for long.
@@ -321,8 +340,10 @@ Math is float64 on both sides; the phone hands Core ML float32. The vectors aren
 - Start energy-based, then switch to Silero.
 - In Auto mode, tapping Listen calibrates for 3 seconds. A centered countdown says "Calibrating",
   shows 3, 2, 1, and "Keep the room quiet", then captions start. Threshold = max(0.001, 2 × the 90th-percentile RMS of fixed 20 ms windows)
-  from that stretch. At least 2 seconds of audio are required; otherwise the previous threshold
-  is kept. Calibration emits no segments, stores no audio, and applies only for the current app
+  from that stretch. **Skip calibration** starts captions with the previous threshold (0.001
+  before any successful calibration). Captions also start with that threshold if less than
+  2 seconds of calibration audio arrived. Tone remains available when connected.
+  Calibration emits no segments, stores no audio, and applies only for the current app
   instance. This provisional energy heuristic can miss quiet speech and does not distinguish
   speech from noise.
 - Settings offers a manual threshold for the current app run. Manual mode skips the Listen
@@ -345,8 +366,15 @@ for caption [t0, t1]:
     best, second = top-2 means
     speaker = best.face_id if best.p >= 0.5 and best.p - second.p >= 0.15 else "unknown"
 ```
-- `"unknown"` means off-screen or ambiguous. Show it as "Someone."
+- `"unknown"` means off-screen or ambiguous. Show it as "Unknown speaker" in gray.
+- `SpeakerScoreBuffer` collects camera scores on the same host-clock origin supplied to
+  microphone capture. Resolve each segment using P7's `captionSpeaker` when VAD delivers
+  it, before ASR queue delays; the buffer retains 15s to cover the 10s maximum segment.
+  Require three frames covering at least half the segment; absent faces contribute zero.
+  Segment speaker IDs reach live cards, transcript, local saves, exports and the dashboard.
 - When a `tone_result` arrives, attach its tag to the caption by `caption_id`.
+  A live caption can wait up to 30 additional seconds for a pending result.
+  If a tag arrives during that wait, keep the caption visible for two more seconds.
 
 **SoundAnalysis**
 - Filter to an allowlist: doorbell, knock, smoke/fire alarm, siren, dog bark, baby cry, laughter, phone ring.
@@ -364,7 +392,16 @@ for caption [t0, t1]:
 - If disconnected, drop tone silently and retry the connection every 5s. This must never affect captions.
 
 **UI**
+- Live captions has compact **Back to Home**, **Start/Stop transcribing**,
+  and **Save captions** icon buttons in the upper-left corner of the camera preview,
+  with VoiceOver labels. The camera controls use the menu's solid pine fill and cream
+  outline. Returning Home stops active capture.
+  Stop flushes pending speech and retains automatic saving.
+  Save writes the current transcript without stopping active capture; it is disabled
+  until captions exist and pending transcriptions finish. A visible status and VoiceOver
+  announcement confirm success. Saved transcripts are under Home → Saved sessions.
 - Live caption list, with the speaker name/color matching a highlight box drawn on that face.
+  On landscape iPhones, the two newest live captions appear in a centered column over the camera.
 - Combined A2/A3 demo places matching large Start/Stop listening and calibration
   controls above the caption feed, with sound banners, haptics, and accessibility
   announcements. Stop clears the current banner while pending captions finish.
@@ -380,12 +417,17 @@ for caption [t0, t1]:
 - Large and dynamic type, high contrast. Follow Apple's Accessibility HIG.
 
 **Past-meetings dashboard** (Platform)
+
+Saved meeting text and metadata automatically sync to the configured tone server while the app is active.
+With no server configured, meetings remain local; explicit JSON export is also available.
+The versioned JSON export contains captions and metadata, never audio or raw events.
+The web dashboard reads local exports in memory or loads synced meetings from the server.
 - Lists saved sessions. Each shows its caption log (speaker, text, tone tag) and an AI summary/notes (section 10).
-- Stores caption text, speakers, tags, and timings **on-device only**. Never audio or video.
+- Stores caption text, speakers, tags, and timings locally and on the configured server. Never audio or video.
 - Works offline. Summaries that need a model the device lacks are simply unavailable.
-- Meeting data leaves the phone only when the user taps Export. Exported files follow `schemas/session_export.schema.json` and contain  saved captions and session metadata, never audio or raw events.
+- Automatic sync and explicit exports follow `schemas/session_export.schema.json` and contain  saved captions and session metadata, never audio or raw events.
 - **Caption persistence implemented (issue #29):** `GraptionCore.SessionRecorder` collects
-  caption records and atomically saves a completed session through `SessionStore`.
+  caption/sound records and atomically checkpoints and saves a completed session through `SessionStore`.
   `FileSessionStore` uses one versioned JSON file per session in private Application Support
   (`Sessions/`), excluded from device/iCloud backups and protected while the phone is locked.
   Records contain session ID/date/duration and caption ID/text/speaker/tone/times/model versions;
@@ -393,12 +435,36 @@ for caption [t0, t1]:
   Tone is optional; late results update the same saved session by caption ID without delaying end.
   Save errors retain the transcript for retry. History loading reports corrupt or unsupported
   files as an error instead of silently returning an empty history.
-- The app has a live ASR pipeline, but persistence is not yet wired to live capture.
-  The **Saved sessions** sheet is available from the live and model-install screens.
-  Debug builds provide **Start Fake Session**
-  and **End Session & Save**, plus saved-transcript inspection/reload to verify persistence
-  across termination. Future capture wiring must call `append`, `applyTone`, and `end` on the
-  session recorder. The full dashboard and summaries remain later work.
+- Live capture now checkpoints delivered captions to local storage and finalizes after Stop
+  drains pending transcriptions. Leaving the app stops capture and saves delivered text.
+  Each microphone Start creates a meeting; calibration is excluded. Storage v2 reads old
+  storage v1 records and adds title, sound events, tone probabilities/dimensional scores,
+  and redacted deletion markers. Portable export writers emit `export_version: "2"`;
+  the dashboard and sync server still read v1 exports. The live events schema stays v1.3.
+  Sound records include ID, phone-relative time, label, confidence and model version.
+  Tone details follow caption IDs, including late results owned by an earlier meeting.
+  No raw vision events, recordings, or landmarks are saved by meeting persistence.
+- Saved sessions supports rename and delete (swipe actions), with default date-based names.
+  Retention options are forever (default), 7, 30 or 90 days, applied while the app is active
+  and when opening history. Active meetings are excluded. A deletion atomically replaces
+  the local transcript with a redacted UUID/date marker; the server does the same on sync
+  and refuses to resurrect it from a stale retry. Name edits survive late recorder writes.
+  Retention/deletion also affect the server once the phone reconnects. Tiny deletion markers
+  remain to make retries safe; separately exported JSON files are not modified.
+- When the app pairs with a Mac or has `TONE_URL` configured, it uploads locally saved meetings to `/api/meetings`
+  every 15 seconds while active, rechecking on launch/foreground. Local files are the durable
+  retry queue; server writes upsert by UUID, including late tone updates. No audio is uploaded
+  by meeting sync. Sync reuses the tone server's bearer credential. It does not run while suspended.
+- The server stores meetings in SQLite (`MEETINGS_DB`, default `data/meetings.sqlite3`).
+  `GET /api/meetings` returns the portable v2 export. The localhost dashboard can recover
+  its existing server credential without issuing a new pairing code. The paired dashboard
+  loads meetings on open and refreshes every 15 seconds. Manual refresh is also available.
+  This is a shared development server, with no per-user accounts or isolation. Use persistent
+  storage for the database; ephemeral cloud disks cannot guarantee retention.
+- Build `apps/web` before starting the server to serve the dashboard at `/graption/`.
+  On the Mac, `http://localhost:8000/` redirects to the dashboard.
+  During web development Vite proxies `/api` to localhost:8000.
+
 
 **Debug mode**
 - Records a session: video file, per-frame `FeatureBuilder` vectors (JSONL), audio WAV, and all events.
@@ -447,13 +513,19 @@ for caption [t0, t1]:
   - Allow a WebSocket request timeout of at least 60 min.
   - Bake the WavLM and head weights into the image so cold starts don't download them.
 - **Endpoint:** `/ws/session`. One connection per app session, handling `tone_request` and `caption_log`.
-- **Auth:** if `TONE_TOKEN` is set, require a matching bearer token. Always set it outside `local` mode.
+- **Pairing:** the Mac's localhost dashboard issues a two-minute, single-use QR code with its
+  Bonjour `.local` address and a pairing code. In Connection & Preferences, the device scans and
+  exchanges the code for its credentials. The server saves its bearer credential alongside
+  the meeting database with owner-only permissions. The app stores the connection in the device
+  Keychain and reconnects for tone, meeting sync, and optional Mac ASR.
+- **Auth:** require a matching bearer token once pairing generates one or `TONE_TOKEN` is set.
+  Non-local modes require a token. `TONE_TOKEN` remains available for manual deployments.
 - **Pipeline** (device auto-select: `cuda` → `mps` → `cpu`; the code must run correctly on all three):
   1. Decode PCM16 and resample to 16 kHz if needed.
   2. WavLM-base+ (frozen), `output_hidden_states=True`, giving 13 layers × T × 768.
   3. Learned softmax-weighted sum over the 13 layers, then mean-pool over time, giving a 768-dim vector.
   4. Head: `Linear(768,256) → ReLU → Dropout(0.3) → Linear(256,6) → softmax`.
-  5. Tag mapper: `tag = argmax` if `max prob ≥ 0.6` and the argmax isn't `neutral`; otherwise `null`.
+  5. Tag mapper (`emotion_tag` in `server/app/tone.py`): take the argmax emotion; if its prob is ≥ `TAG_THRESHOLD` (default 0.6), show its tag from the §9 mapping (happy → `excited`, anger → `upset`); every other case is `null`. `probs` always carries all 6 emotions, so logs keep what the model actually guessed.
 - **Week-1 baseline mode** (`TONE_BACKEND=audeering`, implemented): the audEERING model outputs arousal, valence, and dominance in [0,1]. Map them with tunable thresholds (`AudeeringThresholds` in `server/app/tone.py`). These are the values tuned on team recordings in A4 (`ml/tone/DISCUSSION_LOG.md`), replacing the original 0.65/0.55/0.4/0.3 guesses:
   - arousal > 0.64 and valence > 0.45 → `excited`
   - arousal > 0.47 and valence < 0.4 → `upset`
@@ -524,6 +596,11 @@ for caption [t0, t1]:
 **Data**
 - **CREMA-D** (free): about 7.4k clips, 91 actors, 12 sentences, 6 emotions (anger, disgust, fear, happy, neutral, sad).
 - **Split by actor**, 70/15/15, fixed seed.
+- A10 implementation: `ml/tone/make_splits.py`, seed 42, produces 63/14/14 actors
+  (the nearest whole-actor allocation). Using CREMA-D's `VideoDemographics.csv`,
+  validation and test each contain 7 male and 7 female actors; training contains
+  the remaining 34 male and 29 female actors. Actor IDs only are saved in
+  `ml/tone/splits/crema_d_actors.json` under `train`, `val`, and `test`.
 - The dataset is acted, so **team recordings are the real test set**.
 
 **Pipeline (Mac)**
@@ -534,6 +611,18 @@ for caption [t0, t1]:
 5. **Must beat or match** the audEERING baseline on team recordings (compare on arousal-style tags) before it replaces the baseline.
 6. Export the head weights (`tone-head-vN.pt`) to the Mac. At end of semester, convert to Core ML and move on-device.
 
+**Tags shown on screen** (the app only shows `excited`, `upset`, `calm`, the same words the audEERING baseline uses):
+
+| Emotion | Tag | Why |
+|---|---|---|
+| happy | `excited` | |
+| anger | `upset` | |
+| neutral | `null` | Nothing worth flagging. |
+| sad, fear, disgust | `null` for now | A wrong tag is worse than none. Revisit after testing on team recordings. |
+| (none) | `calm` | No custom-model tag yet: CREMA-D has no calm clips. Only the baseline emits `calm`. |
+
+The mapping is `EMOTION_TAGS` in `server/app/tone.py`, applied by `emotion_tag` (§7 step 5). It is also written in the `tone_result` description in `schemas/events.schema.json`. Change all three together.
+
 **Stretch (only if tests show gaps):** MSP-Podcast (natural speech, needs a GT-signed license) and openSMILE eGeMAPS features concatenated before the head.
 
 ---
@@ -541,6 +630,13 @@ for caption [t0, t1]:
 ## 10. AI summaries and notes (Platform team, non-blocking)
 
 **Feature:** a post-session "catch me up" summary/notes built from the caption log (speaker + text + tone), shown in the past-meetings dashboard (section 6).
+- **Mac dashboard:** a synced meeting supports an on-demand summary and transcript questions
+  through OpenRouter. The Mac holds `OPENROUTER_API_KEY` and requires the server bearer
+  credential for AI requests. OpenRouter settings are read from the repository-root `.env`
+  on each request, taking precedence over inherited shell variables. Environment variables
+  supply settings absent from that file. Only the caption text, speaker IDs, timestamps and the requested question leave
+  the Mac for inference. Replies stay in browser memory. iOS capture and offline transcript
+  viewing are independent of this service.
 - **Target:** Apple Foundation Models on-device (iOS 26+, Apple Intelligence devices). Free and offline. Use `@Generable` for structured output.
 - **Benchmark:** OpenAI API (a small, cheap model) run from Python scripts in `language/`, on exported caption logs. It sets the quality bar that the on-device version is measured against.
   - **Never** call OpenAI from the iOS app; the API key would ship inside the app.
@@ -593,7 +689,9 @@ If the device is overloaded, degrade in this order:
 - **Every event and log** carries model versions.
 - **Every training run** goes to W&B, with the config committed alongside it.
 - **Branching:** PRs to `main`, and CI must pass. Add `CODEOWNERS` per team folder once reviews are enforced.
-- **Secrets** (`TONE_TOKEN`, OpenAI key, cloud credentials) live in `.env` or `.xcconfig` files that are gitignored, never in code or the repo.
+- **Secrets:** manually configured credentials live in gitignored `.env` or `.xcconfig`
+  files. Generated pairing credentials live in the server's private token file and the
+  device Keychain.
 - **Cost control:** Cloud Run scales to zero. Set a billing budget alert at 50% and 90% of the credits. OpenAI keys get a hard monthly spend limit.
 - **Licenses:** the audEERING model and MSP-Podcast are non-commercial. That's fine for this academic MVP, but flag it before any commercial use.
 
@@ -648,6 +746,7 @@ If the device is overloaded, degrade in this order:
 - **CREMA-D, not MSP-Podcast; openSMILE dropped:** no license paperwork. The audEERING baseline (trained on MSP-Podcast) gives natural-speech coverage for free. Both remain stretch goals, used only if tests show gaps.
 - **Tone never blocks captions,** and tone tags only show when confident. A wrong tag is worse than none for DHH users.
 - **Recoverable request errors (schema v1.1):** return descriptive `session_error` messages with the received request so manual clients can correct mistakes without reconnecting. Never log or store the echoed payload.
+- **Custom tone tags reuse the baseline's words:** happy → `excited`, anger → `upset`, everything else → `null` (§9), so the UI shows one vocabulary whichever backend runs. Sad, fear and disgust stay hidden until team recordings show they're reliable; `calm` has no CREMA-D training data. Schema text-only change, no version bump.
 - **Rule-based fusion before learned fusion:** it produces the logged data a learned version would need.
 - **Toolchain baseline:** the project uses Xcode 16-compatible format (77), iOS 17+, and
   GraptionCore uses Swift tools 6.0 so it builds with the installed Xcode 26 toolchain.
@@ -661,8 +760,8 @@ If the device is overloaded, degrade in this order:
 ## 17. Open questions
 
 - Does iOS Club have an Apple Developer team account Graption can use?
-- AVA on a Mac: download status, and how large a subset we can extract and train on locally.
-- Dashboard scope: summaries, notes, or both? How long are past meetings kept on-device?
+- AVA on a Mac: the 153 labeled videos are downloaded and cut (seconds 900-1800, 15 fps, 16 kHz WAV) with `ml/asd/ava_download.py`, split in 4 shards (see `ml/asd/README.md`); status of the shared-Drive upload is tracked there. Still open: how large a subset we can extract and train on locally.
+- Dashboard scope: summaries, notes, or both? Retention is user-selectable (forever/7/30/90 days).
 - Oldest iPhone on the team (for performance benchmarks), and which team devices support Apple Intelligence (for Foundation Models).
 - Budget approval outcome.
 

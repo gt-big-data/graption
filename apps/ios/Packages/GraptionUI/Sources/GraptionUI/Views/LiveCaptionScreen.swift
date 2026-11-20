@@ -7,6 +7,8 @@ public struct LiveCaptionScreen: View {
     @State private var showSettings = false
     @State private var showControlsMenu = false
     @State private var pendingMenuAction: MenuAction?
+    /// Compact on a landscape iPhone.
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     private enum MenuAction {
         case transcript, microphone, settings, home
@@ -24,9 +26,14 @@ public struct LiveCaptionScreen: View {
     private let onCalibrate: (() -> Void)?
     private let isCalibrating: Bool
     private let calibrationCount: Int?
+    private let onSkipCalibration: (() -> Void)?
     private let isSettingUp: Bool
     private let onHome: (() -> Void)?
     private let onTranscript: (() -> Void)?
+    private let onSaveCaptions: (() -> Void)?
+    private let canSaveCaptions: Bool
+    private let pairedMacName: String?
+    private let onPairMac: ((String) async throws -> Void)?
 
     public init(
         cameraPreviewDestination: (() -> AnyView)? = nil,
@@ -41,9 +48,14 @@ public struct LiveCaptionScreen: View {
         onCalibrate: (() -> Void)? = nil,
         isCalibrating: Bool = false,
         calibrationCount: Int? = nil,
+        onSkipCalibration: (() -> Void)? = nil,
         isSettingUp: Bool = false,
         onHome: (() -> Void)? = nil,
-        onTranscript: (() -> Void)? = nil
+        onTranscript: (() -> Void)? = nil,
+        onSaveCaptions: (() -> Void)? = nil,
+        canSaveCaptions: Bool = false,
+        pairedMacName: String? = nil,
+        onPairMac: ((String) async throws -> Void)? = nil
     ) {
         self.cameraPreviewDestination = cameraPreviewDestination
         self.suppliedCaptions = captions
@@ -57,15 +69,28 @@ public struct LiveCaptionScreen: View {
         self.onCalibrate = onCalibrate
         self.isCalibrating = isCalibrating
         self.calibrationCount = calibrationCount
+        self.onSkipCalibration = onSkipCalibration
         self.isSettingUp = isSettingUp
         self.onHome = onHome
         self.onTranscript = onTranscript
+        self.onSaveCaptions = onSaveCaptions
+        self.canSaveCaptions = canSaveCaptions
+        self.pairedMacName = pairedMacName
+        self.onPairMac = onPairMac
     }
 
     private var usesLiveAudio: Bool { onMicrophone != nil }
 
     private var displayedCaptions: [LiveCaption] {
         suppliedCaptions ?? simulator.captions
+    }
+
+    private var isLandscape: Bool { verticalSizeClass == .compact }
+
+    /// Landscape leaves little height, so it keeps the two newest captions
+    /// (captions arrive oldest first) to keep faces in view.
+    private var onScreenCaptions: [LiveCaption] {
+        isLandscape ? Array(displayedCaptions.suffix(2)) : displayedCaptions
     }
 
     private var displayedAlert: SoundAlert? {
@@ -76,7 +101,11 @@ public struct LiveCaptionScreen: View {
         NavigationStack {
             screenContent
                 .navigationDestination(isPresented: $showSettings) {
-                    SettingsScreen(cameraPreviewDestination: cameraPreviewDestination)
+                    SettingsScreen(
+                        cameraPreviewDestination: cameraPreviewDestination,
+                        pairedMacName: pairedMacName,
+                        onPairMac: onPairMac
+                    )
                 }
         }
     }
@@ -92,6 +121,12 @@ public struct LiveCaptionScreen: View {
 
                 videoArea
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .topLeading) {
+                        if let onMicrophone {
+                            transcriptionControls(onMicrophone: onMicrophone)
+                                .padding(16)
+                        }
+                    }
 
                 if onSetup != nil || onCalibrate != nil {
                     preparationRow
@@ -101,18 +136,9 @@ public struct LiveCaptionScreen: View {
 
             // Floating menu button
             Button(action: { showControlsMenu = true }) {
-                ZStack {
-                    Circle()
-                        .fill(Color.graptionBackground)
-                    Circle()
-                        .stroke(Color.graptionAccent, lineWidth: 1)
-
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Color.graptionAccent)
-                }
-                .frame(width: 56, height: 56)
+                cameraControlIcon("line.3.horizontal", size: 56, iconSize: 20)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("Controls")
             .padding(16)
 
@@ -121,21 +147,32 @@ public struct LiveCaptionScreen: View {
                 ZStack {
                     Color.black.opacity(0.55).ignoresSafeArea()
                     VStack(spacing: 8) {
-                        Text("Calibrating")
-                            .font(.title2.bold())
-                            .foregroundStyle(Color.graptionAccent)
-                        Text("\(calibrationCount)")
-                            .font(.system(size: 120, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(.white)
-                            .contentTransition(.numericText())
-                        Text("Keep the room quiet")
-                            .font(.title3.bold())
-                            .foregroundStyle(Color.graptionAccent)
+                        VStack(spacing: 8) {
+                            Text("Calibrating")
+                                .font(.title2.bold())
+                            Text("\(calibrationCount)")
+                                .font(.system(size: isLandscape ? 64 : 120, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(.white)
+                                .contentTransition(.numericText())
+                            Text("Keep the room quiet")
+                                .font(.title3.bold())
+                        }
+                        .foregroundStyle(Color.graptionAccent)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Calibrating. Keep the room quiet. \(calibrationCount)")
+
+                        if let onSkipCalibration {
+                            Button(action: onSkipCalibration) {
+                                Text("Skip calibration")
+                                    .frame(minHeight: 44)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Color.graptionAccent)
+                            .foregroundStyle(Color.graptionBackground)
+                        }
                     }
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Calibrating. Keep the room quiet. \(calibrationCount)")
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -164,17 +201,80 @@ public struct LiveCaptionScreen: View {
             }
 
             if !displayedCaptions.isEmpty && cameraPreviewDestination != nil {
+                // In landscape, a centered column like meeting subtitles,
+                // narrow enough to leave the people on either side visible.
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(displayedCaptions) { caption in
+                    ForEach(onScreenCaptions) { caption in
                         CaptionBubbleView(caption: caption)
                             .transition(.opacity)
                     }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .animation(.easeOut(duration: 0.3), value: displayedCaptions.map(\.id))
+                .frame(maxWidth: isLandscape ? 560 : .infinity, alignment: .leading)
+                .padding(isLandscape ? 8 : 12)
+                .frame(maxWidth: .infinity, alignment: isLandscape ? .center : .leading)
+                .animation(.easeOut(duration: 0.3), value: onScreenCaptions.map(\.id))
             }
         }
+    }
+
+    private func transcriptionControls(onMicrophone: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                if let onHome {
+                    Button(action: onHome) {
+                        cameraControlIcon("house")
+                    }
+                    .accessibilityLabel("Back to Home")
+                }
+
+                Button(action: onMicrophone) {
+                    cameraControlIcon(
+                        isListening ? "stop.fill" : "mic.fill",
+                        color: isListening ? .graptionPeach : .graptionAccent,
+                        enabled: isListening || canListen
+                    )
+                }
+                .accessibilityLabel(isListening ? "Stop transcribing" : "Start transcribing")
+                .disabled(!isListening && !canListen)
+
+                if let onSaveCaptions {
+                    Button(action: onSaveCaptions) {
+                        cameraControlIcon("square.and.arrow.down", enabled: canSaveCaptions)
+                    }
+                    .accessibilityLabel("Save captions")
+                    .disabled(!canSaveCaptions)
+                }
+            }
+
+            if let statusText {
+                Text(statusText)
+                    .font(.footnote)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .foregroundStyle(Color.graptionAccent)
+                    .background(Color.graptionBackground, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
+        }
+        .frame(maxWidth: 200, alignment: .leading)
+        .buttonStyle(.plain)
+    }
+
+    private func cameraControlIcon(
+        _ symbol: String,
+        size: CGFloat = 44,
+        iconSize: CGFloat = 17,
+        color: Color = .graptionAccent,
+        enabled: Bool = true
+    ) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: iconSize, weight: .semibold))
+            .foregroundStyle(color.opacity(enabled ? 1 : 0.45))
+            .frame(width: size, height: size)
+            .background(Color.graptionBackground, in: Circle())
+            .overlay(Circle().strokeBorder(Color.graptionAccent, lineWidth: 1))
+            .contentShape(Circle())
     }
 
     private var preparationRow: some View {
@@ -332,6 +432,16 @@ public struct LiveCaptionScreen: View {
 
 #Preview {
     LiveCaptionScreen()
+}
+
+#Preview("Landscape", traits: .landscapeLeft) {
+    LiveCaptionScreen(
+        cameraPreviewDestination: { AnyView(Color.gray) },
+        captions: [
+            LiveCaption(speakerName: "Someone", text: "Can everyone see the slides on their end?"),
+            LiveCaption(speakerName: "Someone", text: "Yes, we can see them. Go ahead whenever you're ready."),
+        ]
+    )
 }
 
 #Preview("Accessibility XXXL") {

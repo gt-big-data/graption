@@ -1,4 +1,7 @@
 import SwiftUI
+import AVFoundation
+import GraptionVision
+import GraptionCore
 import GraptionAudio
 import GraptionNetwork
 import GraptionUI
@@ -6,6 +9,20 @@ import GraptionUI
 @MainActor
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("meetingRetentionDays") private var retentionDays = 0
+    @StateObject private var cameraController = CameraController()
+    @State private var speakerByCaption: [UUID: String] = [:]
+    @State private var captionRecorders: [UUID: SessionRecorder] = [:]
+    @State private var toneProbabilities: [UUID: [String: Double]] = [:]
+    @State private var toneScores: [UUID: [String: Double]] = [:]
+    @State private var sessionStore: FileSessionStore?
+    @State private var recorder: SessionRecorder?
+    @State private var isSavingCaptions = false
+    @State private var persistenceError: String?
+    @State private var syncStatus = "Meetings saved locally"
+    @State private var meetingSync = MeetingSyncClient()
+    @State private var pairedMac = MacPairing.load()
+    @State private var pairingRevision = UUID()
     @State private var showHomeScreen = true
     @State private var showTranscript = false
     @State private var showSettings = false
@@ -13,9 +30,8 @@ struct ContentView: View {
     @State private var transcriptReturnsToLive = false
     @State private var capture: MicrophoneCapture?
     @StateObject private var toneMonitor = ToneConnectionMonitor(
-        configuration: ToneClientConfiguration.fromAppConfiguration(
-            sessionID: UUID().uuidString
-        )
+        configuration: MacPairing.load()?.toneConfiguration(sessionID: UUID().uuidString)
+            ?? ToneClientConfiguration.fromAppConfiguration(sessionID: UUID().uuidString)
     )
     @State private var soundAlertModel = SoundAlertModel()
     @State private var hasPrintedLabels = false
@@ -28,6 +44,7 @@ struct ContentView: View {
     @State private var isRecording = false
     @State private var isCalibrating = false
     @State private var calibrationCount: Int?
+    @State private var calibrationTask: Task<Bool, Never>?
     @State private var isStarting = false
     @State private var useManualThreshold = false
     @State private var manualThresholdDB: Double?
@@ -39,9 +56,12 @@ struct ContentView: View {
     @State private var isReady = false
     @State private var status = "Loading base.en…"
     @State private var setupFailed = false
+    @State private var toneVersions: [UUID: String] = [:]
+    @State private var toneTags: [UUID: String] = [:]
     @State private var captions: [CaptionEntry] = []
     /// Captions whose on-screen time is up. They leave the camera view but stay in the transcript.
     @State private var expiredCaptionIDs: Set<UUID> = []
+    @State private var deferredExpiryIDs: Set<UUID> = []
     @State private var listenTask: Task<Void, Never>?
 
     private var canListen: Bool {
@@ -54,7 +74,8 @@ struct ContentView: View {
         Array(captions.filter { !expiredCaptionIDs.contains($0.id) }.prefix(3))
             .reversed()
             .map { entry in
-                LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text)
+                LiveCaption(id: entry.id, speakerName: speakerLabel(entry.speakerID),
+                    toneTag: toneTags[entry.id], text: entry.text, speakerID: entry.speakerID)
             }
     }
 
@@ -70,8 +91,18 @@ struct ContentView: View {
         let seconds = Self.onScreenSeconds(for: entry.text)
         Task {
             try? await Task.sleep(for: .seconds(seconds))
-            expiredCaptionIDs.insert(id)
+            if captionRecorders[id] != nil, captions.contains(where: { $0.id == id }) {
+                deferredExpiryIDs.insert(id)
+                try? await Task.sleep(for: .seconds(30))
+                guard deferredExpiryIDs.remove(id) != nil else { return }
+            }
+            expireCaption(id)
         }
+    }
+
+    private func expireCaption(_ id: UUID) {
+        guard captions.contains(where: { $0.id == id }) else { return }
+        expiredCaptionIDs.insert(id)
     }
 
     private var bannerAlert: GraptionUI.SoundAlert? {
@@ -83,11 +114,13 @@ struct ContentView: View {
         Group {
             if showSettings {
                 SettingsScreen(
-                    cameraPreviewDestination: { AnyView(CameraView(captions: bubbleCaptions)) },
+                    cameraPreviewDestination: { AnyView(CameraView(controller: cameraController, captions: bubbleCaptions)) },
                     onBack: {
                         showSettings = false
                         showHomeScreen = true
                     },
+                    pairedMacName: pairedMac?.serverURL.host,
+                    onPairMac: pairMac,
                     manualThresholdDB: Binding(
                         get: { manualThresholdDB ?? initialManualThresholdDB },
                         set: { manualThresholdDB = $0 }
@@ -108,9 +141,9 @@ struct ContentView: View {
                     captions: captions.map { entry in
                         TranscriptCaption(
                             id: entry.id,
-                            speaker: "Someone",
+                            speaker: speakerLabel(entry.speakerID),
                             text: entry.text,
-                            tone: nil
+                            tone: toneTags[entry.id], color: colorForSpeaker(entry.speakerID)
                         )
                     },
                     onHome: {
@@ -120,7 +153,7 @@ struct ContentView: View {
                 )
             } else if showHomeScreen {
                 HomeScreen(
-                    serverStatus: toneMonitor.state.label,
+                    serverStatus: "\(toneMonitor.state.label) · \(syncStatus)",
                     onOpenLiveCaptions: {
                         showHomeScreen = false
                     },
@@ -139,7 +172,7 @@ struct ContentView: View {
                 )
             } else if isReady {
                 LiveCaptionScreen(
-                    cameraPreviewDestination: { AnyView(CameraView(captions: bubbleCaptions)) },
+                    cameraPreviewDestination: { AnyView(CameraView(controller: cameraController, captions: bubbleCaptions)) },
                     captions: bubbleCaptions,
                     soundAlert: bannerAlert,
                     isListening: isRecording || isCalibrating,
@@ -153,6 +186,7 @@ struct ContentView: View {
                         }
                     },
                     calibrationCount: calibrationCount,
+                    onSkipCalibration: { calibrationTask?.cancel() },
                     isSettingUp: isPreparing,
                     onHome: {
                         // Leaving live captions turns the microphone off; the
@@ -163,7 +197,23 @@ struct ContentView: View {
                     onTranscript: {
                         transcriptReturnsToLive = true
                         showTranscript = true
-                    }
+                    },
+                    onSaveCaptions: {
+                        isSavingCaptions = true
+                        Task {
+                            await saveMeeting()
+                            if persistenceError == nil {
+                                status = "Captions saved on iPhone — view Saved sessions from Home"
+                                AccessibilityNotification.Announcement("Captions saved on iPhone").post()
+                            }
+                            isSavingCaptions = false
+                        }
+                    },
+                    canSaveCaptions: recorder != nil && !captions.isEmpty
+                        && !isStarting && !isCalibrating && !flushingCapture
+                        && pendingCaptions == 0 && !isSavingCaptions,
+                    pairedMacName: pairedMac?.serverURL.host,
+                    onPairMac: pairMac
                 )
             } else {
                 InstallBaseEnPage(isInstalling: isPreparing, detail: setupFailed ? status : nil) {
@@ -172,7 +222,23 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSavedSessions) {
-            SavedSessionsView()
+            SavedSessionsView(activeSessionID: recorder?.hasEnded == false ? recorder?.session.id : nil)
+        }
+        .alert("Meeting storage", isPresented: Binding(
+            get: { persistenceError != nil },
+            set: { if !$0 { persistenceError = nil } }
+        )) { Button("Retry save") { Task { await saveMeeting() } } }
+        message: { Text(persistenceError ?? "") }
+        .task(id: pairingRevision) {
+            do { sessionStore = try FileSessionStore.onDevice() }
+            catch { persistenceError = error.localizedDescription }
+            while !Task.isCancelled {
+                await syncMeetings()
+                do { try await Task.sleep(for: .seconds(15)) } catch { break }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active, isRecording || isCalibrating { stopListening() }
         }
         .animation(.default, value: soundAlertModel.currentAlert?.id)
         .sensoryFeedback(.warning, trigger: soundAlertModel.currentAlert?.id) { _, new in
@@ -180,6 +246,39 @@ struct ContentView: View {
         }
         .task {
             isVisible = true
+            toneMonitor.onToneDetails = { event in
+                guard let captionID = event.captionID, let id = UUID(uuidString: captionID),
+                      let owner = captionRecorders.removeValue(forKey: id) else { return }
+                toneTags[id] = event.tag
+                if deferredExpiryIDs.remove(id) != nil {
+                    if event.tag == nil {
+                        expireCaption(id)
+                    } else {
+                        Task {
+                            try? await Task.sleep(for: .seconds(2))
+                            expireCaption(id)
+                        }
+                    }
+                }
+                let modelVersion = event.modelVersion ?? "unknown"
+                toneVersions[id] = modelVersion
+                let probs = event.probs.map {
+                    ["anger": $0.anger, "disgust": $0.disgust, "fear": $0.fear,
+                     "happy": $0.happy, "neutral": $0.neutral, "sad": $0.sad]
+                }
+                let scores = event.scores.map {
+                    ["arousal": $0.arousal, "valence": $0.valence, "dominance": $0.dominance]
+                }
+                toneProbabilities[id] = probs
+                toneScores[id] = scores
+                Task {
+                    do {
+                        try await owner.applyTone(captionID: id, tag: event.tag,
+                            modelVersion: modelVersion, probs: probs, scores: scores)
+                        if !owner.hasEnded { try await owner.checkpoint() }
+                    } catch { persistenceError = error.localizedDescription }
+                }
+            }
             toneMonitor.start()
             do {
                 // Reuse one capture so calibration survives Stop/Start.
@@ -210,16 +309,14 @@ struct ContentView: View {
         }
         .onDisappear {
             stopMicPreview()
+            if isRecording || isCalibrating { stopListening() }
             isVisible = false
             toneMonitor.stop()
             listenTask?.cancel()
-            capture?.onSegment = nil
             capture?.onSoundAlert = nil
             capture?.stop()
             soundAlertModel.clear()
-            pipeline.reset()
             closeASRConnection()
-            pendingCaptions = 0
             isRecording = false
             isCalibrating = false
             calibrationCount = nil
@@ -283,17 +380,35 @@ struct ContentView: View {
         capture.onSoundAlert = { alert in
             // Calibration measures noise; it must not announce or display alerts.
             guard isRecording, !isCalibrating, isVisible else { return }
+            recorder?.appendSound(SavedSoundEvent(id: alert.id, label: alert.label,
+                t: alert.t, confidence: alert.confidence, modelVersion: AppleSoundDetector.modelVersion))
+            Task { await saveMeeting() }
             soundAlertModel.show(alert)
         }
         capture.onSegment = { segment in
-            guard isVisible else { return }
+            guard isVisible || flushingCapture else { return }
             pendingCaptions += 1
+            speakerByCaption[segment.captionID] = cameraController.speaker(
+                from: segment.tStart, to: segment.tEnd)
+            if toneMonitor.state == .connected {
+                // Retain the owner across the next meeting so a late result reaches its original file.
+                captionRecorders[segment.captionID] = recorder
+                // Bound unanswered tone requests without retaining audio.
+                if captionRecorders.count > 256,
+                   let oldest = captionRecorders.keys.first { captionRecorders[oldest] = nil }
+            }
             pipeline.enqueue(segment)
+            Task {
+                await toneMonitor.send(captionID: segment.captionID.uuidString,
+                    tStart: segment.tStart, tEnd: segment.tEnd, samples: segment.samples)
+            }
         }
         capture.onError = { error in
             if isCalibrating {
-                capture.stop()
                 isCalibrating = false
+                calibrationCount = nil
+                calibrationTask?.cancel()
+                capture.stop()
             }
             report(error)
         }
@@ -302,7 +417,7 @@ struct ContentView: View {
             report(error, captionID: id)
         }
         pipeline.onResult = { delivery in
-            captionFinished()
+            defer { captionFinished() }
             let caption = delivery.result
             if isRecording, asrClient != nil {
                 status = caption.asrModelVersion.hasPrefix("mlx-whisper-")
@@ -336,8 +451,17 @@ struct ContentView: View {
             let entry = CaptionEntry(
                 result: caption,
                 text: displayText.isEmpty ? "[No speech recognized]" : displayText,
-                transcriptionSeconds: delivery.transcriptionSeconds
+                transcriptionSeconds: delivery.transcriptionSeconds,
+                speakerID: speakerByCaption.removeValue(forKey: caption.captionID) ?? "unknown"
             )
+            recorder?.append(SavedCaption(id: caption.captionID, text: entry.text,
+                speakerID: entry.speakerID, toneTag: toneTags[caption.captionID],
+                tStart: caption.tStart, tEnd: caption.tEnd,
+                modelVersions: ["asr": caption.asrModelVersion, "asd": MouthMotionScorer.modelVersion].merging(
+                    toneVersions[caption.captionID].map { ["tone": $0] } ?? [:]
+                ) { _, new in new }, toneProbs: toneProbabilities[caption.captionID],
+                toneScores: toneScores[caption.captionID]))
+            Task { await saveMeeting() }
             captions.insert(entry, at: 0)
             scheduleExpiry(of: entry)
         }
@@ -371,6 +495,8 @@ struct ContentView: View {
         guard canListen, !isRecording else { return }
         isStarting = true
         defer { isStarting = false }
+        await saveMeeting()
+        guard persistenceError == nil, let sessionStore else { return }
         guard await capture.requestPermission() else {
             status = "Microphone permission denied"
             return
@@ -379,7 +505,13 @@ struct ContentView: View {
         pipeline.reset()
         soundAlertModel.clear()
         captions.removeAll()
+        speakerByCaption.removeAll()
+        toneProbabilities.removeAll()
+        toneScores.removeAll()
+        toneVersions.removeAll()
+        toneTags.removeAll()
         expiredCaptionIDs.removeAll()
+        deferredExpiryIDs.removeAll()
         let manualDB = useManualThreshold ? (manualThresholdDB ?? initialManualThresholdDB) : nil
         capture.setManualThreshold(manualDB)
         if manualDB == nil {
@@ -391,32 +523,46 @@ struct ContentView: View {
             }
             isCalibrating = true
             status = "Keep the room quiet"
-            for count in [3, 2, 1] {
-                guard !Task.isCancelled, isVisible, isCalibrating else { return }
-                calibrationCount = count
-                do {
-                    try await Task.sleep(for: .seconds(1))
-                } catch {
-                    return
+            let countdown = Task { @MainActor in
+                for count in [3, 2, 1] {
+                    guard !Task.isCancelled else { return false }
+                    calibrationCount = count
+                    do {
+                        try await Task.sleep(for: .seconds(1))
+                    } catch {
+                        return false
+                    }
                 }
+                return !Task.isCancelled
             }
+            calibrationTask = countdown
+            let shouldApplyCalibration = await countdown.value
+            calibrationTask = nil
             guard !Task.isCancelled, isVisible, isCalibrating else { return }
             calibrationCount = nil
             isCalibrating = false
-            do {
-                let threshold = try capture.stopCalibration()
-                logSpeechThreshold(threshold, mode: "Calibrated")
-            } catch {
+            if shouldApplyCalibration {
+                do {
+                    let threshold = try capture.stopCalibration()
+                    logSpeechThreshold(threshold, mode: "Calibrated")
+                } catch CalibrationError.tooShort {
+                    print("Calibration too short. Using the previous RMS threshold.")
+                } catch {
+                    capture.stop()
+                    report(error)
+                    return
+                }
+            } else {
                 capture.stop()
-                report(error)
-                return
             }
         }
         guard !Task.isCancelled, isVisible else { return }
         do {
             closeASRConnection()
             var transcriber: any CaptionTranscriber = localTranscriber
-            if let configuration = ASRClientConfiguration.fromAppConfiguration() {
+            let asrConfiguration = pairedMac == nil
+                ? ASRClientConfiguration.fromAppConfiguration() : pairedMac?.asrConfiguration
+            if let configuration = asrConfiguration {
                 let client = ASRClient(configuration: configuration)
                 asrClient = client
                 transcriber = FallbackCaptionTranscriber(
@@ -428,13 +574,17 @@ struct ContentView: View {
             try await pipeline.prepare(allowDownload: false)
             try Task.checkCancellation()
             guard isVisible else { return }
-            try capture.start()
+            recorder = SessionRecorder(store: sessionStore)
+            let hostTime = mach_absolute_time()
+            cameraController.beginMeeting(at: hostTime)
+            try capture.start(sessionStartHostTime: hostTime)
             if manualDB != nil {
                 logSpeechThreshold(capture.currentThreshold, mode: "Manual")
             }
             isRecording = true
             status = "Listening"
         } catch {
+            cameraController.finishMeeting()
             report(error)
         }
     }
@@ -451,6 +601,7 @@ struct ContentView: View {
         isCalibrating = false
         calibrationCount = nil
         isRecording = false
+        calibrationTask?.cancel()
         listenTask?.cancel()
         listenTask = nil
         flushingCapture = true
@@ -458,7 +609,10 @@ struct ContentView: View {
         // Stop enqueues any flushed segment on the main queue before this block.
         DispatchQueue.main.async {
             flushingCapture = false
-            if pendingCaptions == 0 { closeASRConnection() }
+            if pendingCaptions == 0 {
+                closeASRConnection()
+                Task { await saveMeeting() }
+            }
         }
         soundAlertModel.clear()
         status = wasCalibrating ? "Ready" : "Stopped; finishing pending captions"
@@ -466,7 +620,53 @@ struct ContentView: View {
 
     private func captionFinished() {
         pendingCaptions = max(0, pendingCaptions - 1)
-        if !isRecording, !flushingCapture, pendingCaptions == 0 { closeASRConnection() }
+        if !isRecording, !flushingCapture, pendingCaptions == 0 {
+            closeASRConnection()
+            Task { await saveMeeting() }
+        }
+    }
+
+    private func saveMeeting() async {
+        guard let recorder else { return }
+        do {
+            if !isRecording, !flushingCapture, pendingCaptions == 0 {
+                try await recorder.end()
+                cameraController.finishMeeting()
+                status = "Meeting saved on iPhone"
+            } else {
+                try await recorder.checkpoint()
+            }
+            persistenceError = nil
+        } catch { persistenceError = "Could not save meeting. \(error.localizedDescription)" }
+    }
+
+    private func pairMac(_ code: String) async throws {
+        let pairing = try await MacPairing.connect(scannedText: code)
+        pairedMac = pairing
+        meetingSync = MeetingSyncClient()
+        pairingRevision = UUID()
+        syncStatus = "Syncing saved meetings"
+        toneMonitor.configure(pairing.toneConfiguration(sessionID: UUID().uuidString))
+    }
+
+    private func syncMeetings() async {
+        guard let sessionStore else { return }
+        do {
+            if retentionDays > 0 {
+                let activeID = recorder?.hasEnded == false ? recorder?.session.id : nil
+                let cutoff = Date().addingTimeInterval(-Double(retentionDays) * 86400)
+                try await sessionStore.prune(olderThan: cutoff, excluding: activeID)
+            }
+            guard let configuration = pairedMac?.toneConfiguration(sessionID: "meeting-sync")
+                ?? ToneClientConfiguration.fromAppConfiguration(sessionID: "meeting-sync")
+            else { return }
+            try Task.checkCancellation()
+            try await meetingSync.sync(store: sessionStore, configuration: configuration)
+            try Task.checkCancellation()
+            syncStatus = "Saved meetings synced"
+        } catch {
+            if !Task.isCancelled { syncStatus = "Meetings saved locally; sync will retry" }
+        }
     }
 
     private func closeASRConnection() {
@@ -497,27 +697,33 @@ private struct InstallBaseEnPage: View {
 
     var body: some View {
         ZStack {
-            Color(red: 11 / 255, green: 31 / 255, blue: 59 / 255)
+            Color.graptionBackground
                 .ignoresSafeArea()
             VStack(spacing: 20) {
+                GraptionLogo()
+                    .frame(width: 88, height: 88)
+                    .padding(.bottom, 8)
                 Text("Install base.en")
                     .font(.largeTitle.bold())
-                    .foregroundStyle(Color(red: 1, green: 149 / 255, blue: 0))
+                    .foregroundStyle(Color.graptionAccent)
                 Text("Wi-Fi is needed")
                     .font(.title3)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.graptionSecondaryText)
                 if let detail, detail != "Wi-Fi is needed" {
                     Text(detail)
                         .font(.body)
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(Color.graptionAccent.opacity(0.8))
                 }
-                Button(isInstalling ? "Installing…" : "Install") {
+                Button {
                     install()
+                } label: {
+                    Text(isInstalling ? "Installing…" : "Install")
+                        .foregroundStyle(Color.graptionBackground)
                 }
                 .disabled(isInstalling)
                 .buttonStyle(.borderedProminent)
-                .tint(Color(red: 1, green: 149 / 255, blue: 0))
+                .tint(Color.graptionPeach)
             }
             .padding(32)
         }
@@ -529,6 +735,7 @@ private struct CaptionEntry: Identifiable {
     let result: TranscriptionResult
     let text: String
     let transcriptionSeconds: TimeInterval
+    let speakerID: String
     var id: UUID { result.captionID }
 }
 

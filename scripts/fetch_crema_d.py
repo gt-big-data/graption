@@ -15,7 +15,7 @@ BASE_URL = (
 )
 ACTORS = range(1001, 1092)
 # IEO is the only sentence recorded at several intensities; the rest are "XX".
-SENTENCES = ("DFA", "IOM", "ITH", "ITS", "IWL", "IWW", "MTI", "TAI", "TIE", "TSI", "WSI")
+SENTENCES = ("DFA", "IEO", "IOM", "ITH", "ITS", "IWL", "IWW", "MTI", "TAI", "TIE", "TSI", "WSI")
 EMOTIONS = ("ANG", "DIS", "FEA", "HAP", "NEU", "SAD")
 
 
@@ -49,10 +49,11 @@ def main(argv: list[str] | None = None) -> None:
     step = len(ACTORS) / args.actors
     actors = [ACTORS[int(i * step)] for i in range(args.actors)]
     names = [
-        f"{actor}_{sentence}_{emotion}_XX.wav"
+        f"{actor}_{sentence}_{emotion}_{intensity}.wav"
         for actor in actors
         for sentence in SENTENCES
         for emotion in EMOTIONS
+        for intensity in (("LO", "MD", "HI", "XX") if sentence == "IEO" else ("XX",))
     ]
     args.out.mkdir(parents=True, exist_ok=True)
 

@@ -33,7 +33,7 @@ final class SessionStoreTests: XCTestCase {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         XCTAssertEqual(files.count, 1)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: files[0])) as? [String: Any])
-        XCTAssertEqual(Set(json.keys), ["storageVersion", "id", "startedAt", "duration", "captions"])
+        XCTAssertEqual(Set(json.keys), ["storageVersion", "id", "startedAt", "duration", "captions", "soundEvents"])
         let captions = try XCTUnwrap(json["captions"] as? [[String: Any]])
         XCTAssertEqual(Set(captions[0].keys), ["id", "text", "speakerID", "toneTag", "tStart", "tEnd", "modelVersions"])
     }
@@ -109,6 +109,52 @@ final class SessionStoreTests: XCTestCase {
         try await recorder.end()
         let loaded = try await FileSessionStore(directory: directory).loadSessions()
         XCTAssertEqual(loaded, [recorder.session])
+    }
+
+    @MainActor
+    func testSoundDetailsRenameAndDeletionSurviveLateResults() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = FileSessionStore(directory: directory)
+        let recorder = SessionRecorder(store: store)
+        let caption = SavedCaption(text: "Hello", speakerID: "f2", tStart: 0, tEnd: 1,
+            modelVersions: ["asr": "test"])
+        recorder.append(caption)
+        recorder.appendSound(SavedSoundEvent(label: "doorbell", t: 2, confidence: 0.9,
+            modelVersion: "sound-v1"))
+        try await recorder.checkpoint()
+        XCTAssertFalse(recorder.hasEnded)
+        try await store.rename(recorder.session.id, title: "Planning")
+        try await recorder.end()
+        try await recorder.applyTone(captionID: caption.id, tag: nil, modelVersion: "tone-v1",
+            probs: ["happy": 0.4], scores: ["arousal": 0.3])
+        let saved = try await store.loadSessions()
+        XCTAssertEqual(saved.first?.title, "Planning")
+        XCTAssertEqual(saved.first?.soundEvents?.first?.label, "doorbell")
+        XCTAssertEqual(saved.first?.captions.first?.toneProbs?["happy"], 0.4)
+        try await store.delete(recorder.session.id)
+        try await recorder.applyTone(captionID: caption.id, tag: "excited", modelVersion: "tone-v2")
+        let visible = try await store.loadSessions()
+        let sync = try await store.loadSyncSessions()
+        XCTAssertTrue(visible.isEmpty)
+        XCTAssertEqual(sync.count, 1)
+        XCTAssertNotNil(sync.first?.deletedAt)
+        XCTAssertTrue(sync.first?.captions.isEmpty == true)
+        XCTAssertTrue(sync.first?.soundEvents?.isEmpty == true)
+        XCTAssertNil(sync.first?.title)
+    }
+
+    func testRetentionPreservesActiveMeeting() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = FileSessionStore(directory: directory)
+        let old = SavedSession(startedAt: .distantPast, duration: 0, captions: [])
+        let active = SavedSession(startedAt: .distantPast, duration: 0, captions: [])
+        try await store.save(old)
+        try await store.save(active)
+        try await store.prune(olderThan: Date(), excluding: active.id)
+        let visible = try await store.loadSessions()
+        XCTAssertEqual(visible.map(\.id), [active.id])
     }
 
     func testCorruptFileSurfacesError() async throws {

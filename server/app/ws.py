@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from app.events import CaptionLog, SessionError, ToneRequest, ToneResult
 from app.observability import ConnectionMetrics, logger, record
+from app.pairing import server_token
 from app.tone import ToneBackend
 
 router = APIRouter()
@@ -79,7 +80,7 @@ def session_mismatch_message(expected: str, received: str, field: str = "session
 @router.websocket("/ws/session")
 async def session(websocket: WebSocket, session_id: str = Query(min_length=1)) -> None:
     backend: ToneBackend = websocket.app.state.tone_backend
-    token = os.getenv("TONE_TOKEN", "")
+    token = server_token()
     mode = os.getenv("DEPLOY_MODE", "local")
     authorization = websocket.headers.get("authorization", "")
     if (mode != "local" and not token) or (

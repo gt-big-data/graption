@@ -13,6 +13,7 @@ import UIKit
 import Vision
 import simd
 import MediaPipeTasksVision
+import GraptionCore
 import GraptionUI
 import GraptionVision
 
@@ -43,9 +44,9 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     private static let minFaceConfidence: Float = 0.5
 
     let session = AVCaptureSession()
-    /// called on the video queue after every frame with the tracked faces. the guessed speaker
-    /// id (nil if none). and the frame's pixel size.
-    var onFaces: (([FaceTrack], String?, CGSize) -> Void)?
+    /// Video-queue callback: tracked faces, per-face activity scores, phone host timestamp,
+    /// and analyzed frame size. No camera data is stored.
+    var onFaces: (([FaceTrack], [String: Double], Double, CGSize) -> Void)?
     private var cameraPosition: AVCaptureDevice.Position = .back
     private var videoRotationAngle: CGFloat = 90
 
@@ -66,9 +67,8 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     private var cropPool: CVPixelBufferPool?
     // v3. tracking lives in GraptionVision/FaceTracker.swift.
     private var tracker = FaceTracker()
-    // largest face guess until the core ml speaker model replaces it behind SpeakerScorer.
-    private var speakerScorer: any SpeakerScorer = LargestFaceScorer()
-    private var publishedEmpty = false
+    // A replaceable, provisional visual scorer until the trained speaker model is available.
+    private var speakerScorer: any SpeakerScorer = MouthMotionScorer()
     private var lastLandmarkerTimestamp = -1
 
     init(landmarkMode: LandmarkMode) {
@@ -93,8 +93,9 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
                 session.stopRunning()
             }
             videoQueue.async { [self] in
-                // camera stopped means session over. ids restart at f1.
-                tracker.reset()
+                // Never reuse an ID when a preview closes during the same conversation.
+                tracker.forgetTracks()
+                speakerScorer = MouthMotionScorer()
             }
         }
     }
@@ -147,7 +148,6 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
             videoQueue.async { [self] in
                 // other camera means other people. new ids but numbering keeps counting.
                 tracker.forgetTracks()
-                publishedEmpty = false
             }
             completion(true)
         }
@@ -242,11 +242,8 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
 
         let frameSize = CGSize(width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
         let faces = tracker.update(with: detectFaces(in: pixelBuffer, timestamp: timestamp), at: timestamp)
-        let speaker = speakerScorer.scores(for: faces, at: timestamp).likelySpeaker()
-        // Skip repeated empty updates so an empty room doesn't re-render SwiftUI at 15 fps.
-        if faces.isEmpty && publishedEmpty { return }
-        publishedEmpty = faces.isEmpty
-        onFaces?(faces, speaker, frameSize)
+        let scores = speakerScorer.scores(for: faces, at: timestamp)
+        onFaces?(faces, scores, timestamp, frameSize)
     }
 
     // MARK: Detection
@@ -555,6 +552,33 @@ final class CameraController: ObservableObject {
     /// Width / height of the analyzed frames; flips when the phone rotates.
     @Published private(set) var captureAspectRatio: CGFloat = 9.0 / 16.0
     private var isSwitchingCamera = false
+    private var meetingOrigin: Double?
+    private var scoreBuffer = SpeakerScoreBuffer()
+    private var previewVisible = false
+
+    func beginMeeting(at hostTime: UInt64) {
+        meetingOrigin = AVAudioTime.seconds(forHostTime: hostTime)
+        scoreBuffer = SpeakerScoreBuffer()
+    }
+
+    func finishMeeting() {
+        meetingOrigin = nil
+        if !previewVisible { stop() }
+    }
+
+    func speaker(from start: Double, to end: Double) -> String {
+        scoreBuffer.speaker(from: start, to: end)
+    }
+
+    func previewDidAppear() {
+        previewVisible = true
+        start()
+    }
+
+    func previewDidDisappear() {
+        previewVisible = false
+        if meetingOrigin == nil { stop() }
+    }
 
     // Landmark mode for the whole app. Currently .faceCrops; change to .fullFrame to switch.
     // ASD training extraction must use the same mode (GRAPTION_CONTEXT.md §6).
@@ -562,11 +586,21 @@ final class CameraController: ObservableObject {
     var session: AVCaptureSession { engine.session }
 
     init() {
-        engine.onFaces = { [weak self] faces, speakerID, frameSize in
+        engine.onFaces = { [weak self] faces, scores, timestamp, frameSize in
             DispatchQueue.main.async {
-                self?.faces = faces
-                self?.speakerID = speakerID
-                self?.captureAspectRatio = frameSize.width / frameSize.height
+                guard let self else { return }
+                if !faces.isEmpty || !self.faces.isEmpty { self.faces = faces }
+                let ranked = scores.sorted { $0.value > $1.value }
+                let activeSpeaker = ranked.first.flatMap { best -> String? in
+                    best.value >= 0.5 && best.value - (ranked.dropFirst().first?.value ?? 0) >= 0.15
+                        ? best.key : nil
+                }
+                if self.speakerID != activeSpeaker { self.speakerID = activeSpeaker }
+                if let origin = self.meetingOrigin {
+                    self.scoreBuffer.append(scores, at: timestamp - origin)
+                }
+                let aspectRatio = frameSize.width / frameSize.height
+                if self.captureAspectRatio != aspectRatio { self.captureAspectRatio = aspectRatio }
             }
         }
     }
@@ -717,6 +751,11 @@ struct CameraView: View {
     @Environment(\.isPresented) private var isPresented
     var captions: [LiveCaption] = []
 
+    init(controller: CameraController = CameraController(), captions: [LiveCaption] = []) {
+        _controller = StateObject(wrappedValue: controller)
+        self.captions = captions
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -741,7 +780,7 @@ struct CameraView: View {
                                     isSpeaker: face.id == controller.speakerID,
                                     size: geometry.size,
                                     sourceAspectRatio: controller.captureAspectRatio,
-                                    color: speakerBoxColor()
+                                    color: colorForSpeaker(face.id)
                                 )
                             }
                         }
@@ -783,18 +822,21 @@ struct CameraView: View {
             if controller.status == .running {
                 Button(action: controller.flipCamera) {
                     Image(systemName: "arrow.triangle.2.circlepath.camera")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Color.graptionAccent)
                         .frame(width: 52, height: 52)
-                        .background(.black.opacity(0.45), in: Circle())
+                        .background(Color.graptionBackground, in: Circle())
+                        .overlay(Circle().strokeBorder(Color.graptionAccent, lineWidth: 1))
+                        .contentShape(Circle())
                 }
+                .buttonStyle(.plain)
                 .padding(isPresented ? .bottom : .top, isPresented ? 16 : 84)
                 .padding(.trailing, isPresented ? 16 : 18)
                 .accessibilityLabel(controller.cameraPosition == .back ? "Use selfie camera" : "Use back camera")
             }
         }
-        .onAppear { controller.start() }
-        .onDisappear { controller.stop() }
+        .onAppear { controller.previewDidAppear() }
+        .onDisappear { controller.previewDidDisappear() }
     }
 
     private func statusMessage(_ title: String, detail: String, systemImage: String) -> some View {
@@ -810,15 +852,11 @@ struct CameraView: View {
         .foregroundStyle(.white)
         .padding()
     }
-
-    private func speakerBoxColor() -> Color {
-        speakerCaptionColor(captions.first?.speakerName)
-    }
 }
 
 /// Solid when MediaPipe fit a mesh to the face; dashed when only Vision detected it
 /// (usually a face too small or turned away for landmarks).
-/// The outline uses the active caption's speaker color. The label still shows the track id.
+/// Each tracked face has the same stable color as its captions.
 private struct FaceBox: View {
     #if DEBUG
     /// Head-pose readout under each face box (yaw/pitch/roll in degrees, the same values as
@@ -858,7 +896,7 @@ private struct FaceBox: View {
             )
             .overlay(alignment: .topLeading) {
                 // The id stays visible so a returning face can be checked against the same track.
-                Text(isSpeaker ? "\(id) talking" : id)
+                Text(isSpeaker ? "\(speakerLabel(id)) talking" : speakerLabel(id))
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.black)
                     .padding(.horizontal, 4)

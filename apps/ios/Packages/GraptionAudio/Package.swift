@@ -30,7 +30,10 @@ let package = Package(
         ),
         .testTarget(
             name: "GraptionAudioTests",
-            dependencies: ["GraptionAudio"]
+            dependencies: ["GraptionAudio"],
+            // Copy of ml/common/fixtures/ (make_fixtures.py writes both): the simulator
+            // can't read the repo directly (macOS privacy protection).
+            resources: [.copy("Fixtures")]
         )
     ]
 )
