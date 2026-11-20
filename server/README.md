@@ -249,7 +249,7 @@ app is active.
 
 Put `OPENROUTER_API_KEY` in the gitignored **repository-root `.env`** on the Mac.
 The dashboard gets its server credential from the pairing workflow.
-The default model is `google/gemma-3-27b-it:free`.
+The default model is `anthropic/claude-haiku-5.5`.
 `OPENROUTER_MODEL` selects another explicit non-OpenAI model.
 
 After building the dashboard, start or restart the Mac server from the repo root.
