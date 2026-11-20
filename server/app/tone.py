@@ -87,6 +87,23 @@ def emotion_tag(
     return EMOTION_TAGS.get(emotion)
 
 
+DEFAULT_FALLBACK_TAG = "calm"
+
+
+def fallback_tag() -> str | None:
+    """Tag shown when a real model finds no confident tone (demo decision, GRAPTION_CONTEXT §7).
+
+    TONE_FALLBACK_TAG overrides it; set it to an empty value to send null instead. The mock
+    backend never uses it, since it makes no prediction at all.
+    """
+    value = os.getenv("TONE_FALLBACK_TAG", DEFAULT_FALLBACK_TAG).strip().lower()
+    if not value:
+        return None
+    if value not in {"excited", "upset", "calm"}:
+        raise ValueError(f"TONE_FALLBACK_TAG must be excited, upset, calm or empty, not {value!r}.")
+    return value
+
+
 def create_backend(name: str | None = None) -> ToneBackend:
     """Pick the backend from TONE_BACKEND: mock (default) or audeering."""
     name = (name or os.getenv("TONE_BACKEND") or "mock").strip().lower()
@@ -96,5 +113,5 @@ def create_backend(name: str | None = None) -> ToneBackend:
         # Imported here so torch never loads unless this backend is chosen.
         from app.audeering import AudeeringToneBackend
 
-        return AudeeringToneBackend()
+        return AudeeringToneBackend(fallback_tag=fallback_tag())
     raise ValueError(f"Unknown TONE_BACKEND {name!r}; expected 'mock' or 'audeering'.")

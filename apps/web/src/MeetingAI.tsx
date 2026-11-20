@@ -32,7 +32,7 @@ export default function MeetingAI({ meetingID, serverToken }: { meetingID: strin
 
   return <section className="meeting-ai" aria-labelledby="meeting-ai-heading">
     <h2 id="meeting-ai-heading">Meeting AI</h2>
-    <p>Summarizing or asking a question sends this meeting’s caption text to OpenRouter.</p>
+    <p>Summarizing or asking a question sends this meeting’s caption text from the Mac to OpenAI (or OpenRouter, if configured).</p>
     <button type="button" disabled={busy} onClick={() => void ask()}>Generate summary</button>
     <form onSubmit={event => {
       event.preventDefault();
@@ -46,7 +46,7 @@ export default function MeetingAI({ meetingID, serverToken }: { meetingID: strin
     </form>
     {error && <p role="alert">{error}</p>}
     <div aria-live="polite">
-      {busy && <p>Waiting for OpenRouter…</p>}
+      {busy && <p>Waiting for the AI model…</p>}
       {result && <div className="meeting-answer">
         <h3>{result.title}</h3>
         <p>{result.answer}</p>

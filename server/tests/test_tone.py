@@ -19,6 +19,7 @@ from app.tone import (
     TonePrediction,
     create_backend,
     emotion_tag,
+    fallback_tag,
     map_tag,
     no_probs,
 )
@@ -90,6 +91,18 @@ def test_default_backend_is_mock(monkeypatch):
     assert isinstance(create_backend(), MockToneBackend)
 
 
+def test_fallback_tag_defaults_to_calm_and_can_be_disabled(monkeypatch):
+    monkeypatch.delenv("TONE_FALLBACK_TAG", raising=False)
+    assert fallback_tag() == "calm"
+    monkeypatch.setenv("TONE_FALLBACK_TAG", " Excited ")
+    assert fallback_tag() == "excited"
+    monkeypatch.setenv("TONE_FALLBACK_TAG", "")
+    assert fallback_tag() is None
+    monkeypatch.setenv("TONE_FALLBACK_TAG", "sad")
+    with pytest.raises(ValueError, match="sad"):
+        fallback_tag()
+
+
 def test_unknown_backend_fails_at_startup(monkeypatch):
     monkeypatch.setenv("TONE_BACKEND", "custom")
     with pytest.raises(ValueError, match="custom"):
@@ -152,7 +165,10 @@ def test_audeering_backend_end_to_end(monkeypatch, tmp_path):
                 websocket.send_json(tone_request(audio))
                 response = websocket.receive_json()
                 VALIDATOR.validate(response)
-                assert response["model_version"] == "audeering-msp-dim-a4"
+                assert response["model_version"].startswith("audeering-msp-dim-a4")
                 assert response["tag"] in TAGS
                 if expect_none:
-                    assert response["tag"] is None
+                    # Too short to judge: the demo default tag, marked in the version.
+                    assert response["tag"] == "calm"
+                    assert response["model_version"] == "audeering-msp-dim-a4+default-calm"
+                    assert "scores" not in response

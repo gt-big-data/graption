@@ -89,6 +89,11 @@ public struct FaceTracker: Sendable {
     private var tracks: [TrackedFace] = []
     /// next id number. only `reset()` rewinds it so ids are never reused in a session.
     private var nextNumber = 1
+    /// When true, ids restart at `f1` once every track has retired (nobody seen for
+    /// `maxUnseen`). Off by default: ids are then never reused within a session.
+    public var restartsNumberingWhenEmpty = false
+    /// Bumped each time numbering restarts, so callers can detach anything keyed by old ids.
+    public private(set) var numberingGeneration = 0
 
     public init() {}
 
@@ -149,6 +154,11 @@ public struct FaceTracker: Sendable {
         tracks.removeAll { track in
             timestamp - track.lastSeen > maxUnseen ||
                 track.box.maxX < 0 || track.box.minX > 1 || track.box.maxY < 0 || track.box.minY > 1
+        }
+        // everyone has left: the next face is f1 again (opt-in).
+        if restartsNumberingWhenEmpty, tracks.isEmpty, nextNumber > 1 {
+            nextNumber = 1
+            numberingGeneration += 1
         }
         // still alive but missed for a while means remembered not shown.
         return tracks.filter { $0.missedFrames <= maxCoastFrames }.map(\.output)

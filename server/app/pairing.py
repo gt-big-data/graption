@@ -17,6 +17,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from app.asr import asr_requires_pairing
+
 router = APIRouter()
 PAIRING_LIFETIME = 120
 
@@ -138,7 +140,7 @@ async def connect_device(body: PairingCode, request: Request):
         raise HTTPException(503, "Pairing is unavailable.")
     request.app.state.device_pairing = ("", 0)
     asr_token = None
-    if os.getenv("ASR_BACKEND", "").strip().lower() == "mlx":
+    if asr_requires_pairing():
         asr_token = os.getenv("ASR_TOKEN") or token
     return JSONResponse(
         {"token": token, "asr_token": asr_token},

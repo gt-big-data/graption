@@ -24,8 +24,10 @@ public struct MacPairing: Codable, Sendable {
         ToneClientConfiguration(serverURL: serverURL, sessionID: sessionID, token: token)
     }
 
+    /// Mac transcription (MLX or Deepgram). The server accepts its pairing token for ASR
+    /// unless ASR_TOKEN overrides it, so a pairing made before ASR was enabled still works.
     public var asrConfiguration: ASRClientConfiguration? {
-        asrToken.map { ASRClientConfiguration(serverURL: serverURL, token: $0) }
+        ASRClientConfiguration(serverURL: serverURL, token: asrToken ?? token)
     }
 
     public static func connect(scannedText: String) async throws -> Self {

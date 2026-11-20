@@ -70,7 +70,11 @@ def decode_pcm16(audio: bytes, sample_rate: int) -> np.ndarray:
 class AudeeringToneBackend:
     model_version = "audeering-msp-dim-a4"
 
-    def __init__(self, thresholds: AudeeringThresholds = A4_THRESHOLDS) -> None:
+    def __init__(
+        self,
+        thresholds: AudeeringThresholds = A4_THRESHOLDS,
+        fallback_tag: str | None = None,
+    ) -> None:
         try:
             self.extractor = Wav2Vec2FeatureExtractor.from_pretrained(
                 MODEL_NAME, local_files_only=True
@@ -83,28 +87,42 @@ class AudeeringToneBackend:
         self.device = pick_device()
         self.model = model.to(self.device).eval()
         self.thresholds = thresholds
+        # Demo default (TONE_FALLBACK_TAG): shown when no rule applies, marked in model_version.
+        self.fallback_tag = fallback_tag
         # One inference at a time: the model is shared across connections.
         self.lock = threading.Lock()
 
     async def predict(self, audio: bytes, sample_rate: int) -> TonePrediction:
         # Off the event loop so other connections keep being served.
-        tag = await asyncio.to_thread(self.infer_tag, audio, sample_rate)
-        return TonePrediction(tag=tag, probs=no_probs(), model_version=self.model_version)
+        tag, scores = await asyncio.to_thread(self.infer, audio, sample_rate)
+        version = self.model_version
+        if tag is None and self.fallback_tag:
+            tag, version = self.fallback_tag, f"{self.model_version}+default-{self.fallback_tag}"
+        return TonePrediction(tag=tag, probs=no_probs(), model_version=version, scores=scores)
+
+    def infer(self, audio: bytes, sample_rate: int) -> tuple[str | None, dict[str, float] | None]:
+        """Rule-based tag (None when no rule applies) and the raw scores, if computed."""
+        scores = self.dimensions(audio, sample_rate)
+        if scores is None:
+            return None, None
+        return map_tag(scores["arousal"], scores["valence"], self.thresholds), scores
 
     def infer_tag(self, audio: bytes, sample_rate: int) -> str | None:
-        arousal, valence = self.scores(audio, sample_rate)
-        if arousal is None:
-            return None
-        return map_tag(arousal, valence, self.thresholds)
+        return self.infer(audio, sample_rate)[0]
 
     def scores(self, audio: bytes, sample_rate: int) -> tuple[float | None, float | None]:
         """Return (arousal, valence) in about [0, 1], or (None, None) for too-short audio."""
+        scores = self.dimensions(audio, sample_rate)
+        return (None, None) if scores is None else (scores["arousal"], scores["valence"])
+
+    def dimensions(self, audio: bytes, sample_rate: int) -> dict[str, float] | None:
+        """Arousal, valence and dominance in about [0, 1]; None for too-short audio."""
         if len(audio) // 2 < MIN_SECONDS * sample_rate:
-            return None, None
+            return None
         samples = decode_pcm16(audio, sample_rate)
         inputs = self.extractor(samples, sampling_rate=SAMPLE_RATE, return_tensors="pt")
         with self.lock, torch.no_grad():
             outputs = self.model(inputs.input_values.to(self.device))
         # The checkpoint's output order is arousal, dominance, valence.
-        arousal, _dominance, valence = outputs[0].tolist()
-        return arousal, valence
+        arousal, dominance, valence = outputs[0].tolist()
+        return {"arousal": arousal, "valence": valence, "dominance": dominance}

@@ -34,7 +34,19 @@ def create_asr_backend() -> ASRBackend:
         return MockASRBackend()
     if name == "mlx":
         return _mlx_backend(os.getenv("ASR_MODEL_PATH", ""), os.getenv("ASR_MODEL_REVISION", ""))
-    raise ValueError("ASR_BACKEND must be mock or mlx")
+    if name == "deepgram":
+        from app.deepgram_asr import DeepgramASRBackend
+
+        return DeepgramASRBackend()
+    raise ValueError("ASR_BACKEND must be mock, mlx or deepgram")
+
+
+# Real backends cost compute or money, so they require the paired device's bearer token.
+AUTHENTICATED_BACKENDS = {"mlx", "deepgram"}
+
+
+def asr_requires_pairing() -> bool:
+    return os.getenv("ASR_BACKEND", "").strip().lower() in AUTHENTICATED_BACKENDS
 
 
 @lru_cache(maxsize=1)

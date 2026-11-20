@@ -45,8 +45,8 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
 
     let session = AVCaptureSession()
     /// Video-queue callback: tracked faces, per-face activity scores, phone host timestamp,
-    /// and analyzed frame size. No camera data is stored.
-    var onFaces: (([FaceTrack], [String: Double], Double, CGSize) -> Void)?
+    /// analyzed frame size, and the tracker's id-numbering generation. No camera data is stored.
+    var onFaces: (([FaceTrack], [String: Double], Double, CGSize, Int) -> Void)?
     private var cameraPosition: AVCaptureDevice.Position = .back
     private var videoRotationAngle: CGFloat = 90
 
@@ -66,7 +66,12 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
     private var faceLandmarker: FaceLandmarker?
     private var cropPool: CVPixelBufferPool?
     // v3. tracking lives in GraptionVision/FaceTracker.swift.
-    private var tracker = FaceTracker()
+    // Ids restart at f1 once nobody has been seen for 2 s (demo request, GRAPTION_CONTEXT.md §6).
+    private var tracker: FaceTracker = {
+        var tracker = FaceTracker()
+        tracker.restartsNumberingWhenEmpty = true
+        return tracker
+    }()
     // A replaceable, provisional visual scorer until the trained speaker model is available.
     private var speakerScorer: any SpeakerScorer = MouthMotionScorer()
     private var lastLandmarkerTimestamp = -1
@@ -243,7 +248,7 @@ nonisolated final class FaceCaptureEngine: NSObject, AVCaptureVideoDataOutputSam
         let frameSize = CGSize(width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
         let faces = tracker.update(with: detectFaces(in: pixelBuffer, timestamp: timestamp), at: timestamp)
         let scores = speakerScorer.scores(for: faces, at: timestamp)
-        onFaces?(faces, scores, timestamp, frameSize)
+        onFaces?(faces, scores, timestamp, frameSize, tracker.numberingGeneration)
     }
 
     // MARK: Detection
@@ -551,6 +556,8 @@ final class CameraController: ObservableObject {
     @Published private(set) var speakerID: String?
     /// Width / height of the analyzed frames; flips when the phone rotates.
     @Published private(set) var captureAspectRatio: CGFloat = 9.0 / 16.0
+    /// Changes when face numbering restarts at f1, so old captions stop matching new faces.
+    @Published private(set) var idGeneration = 0
     private var isSwitchingCamera = false
     private var meetingOrigin: Double?
     private var scoreBuffer = SpeakerScoreBuffer()
@@ -566,8 +573,15 @@ final class CameraController: ObservableObject {
         if !previewVisible { stop() }
     }
 
+    /// Demo attribution: whenever a face is (or recently was) on camera, the caption goes to
+    /// someone. Strict fusion first, then the most active face around the segment, then the
+    /// highlighted or largest face on screen now. "unknown" only with nobody in view.
     func speaker(from start: Double, to end: Double) -> String {
-        scoreBuffer.speaker(from: start, to: end)
+        let strict = scoreBuffer.speaker(from: start, to: end)
+        if strict != "unknown" { return strict }
+        if let guess = scoreBuffer.mostLikelySpeaker(from: start, to: end) { return guess }
+        if let speakerID { return speakerID }
+        return faces.max { $0.box.width * $0.box.height < $1.box.width * $1.box.height }?.id ?? "unknown"
     }
 
     func previewDidAppear() {
@@ -586,9 +600,14 @@ final class CameraController: ObservableObject {
     var session: AVCaptureSession { engine.session }
 
     init() {
-        engine.onFaces = { [weak self] faces, scores, timestamp, frameSize in
+        engine.onFaces = { [weak self] faces, scores, timestamp, frameSize, generation in
             DispatchQueue.main.async {
                 guard let self else { return }
+                if self.idGeneration != generation {
+                    self.idGeneration = generation
+                    // Old scores belong to people who left; a reused id must not inherit them.
+                    if self.meetingOrigin != nil { self.scoreBuffer = SpeakerScoreBuffer() }
+                }
                 if !faces.isEmpty || !self.faces.isEmpty { self.faces = faces }
                 let ranked = scores.sorted { $0.value > $1.value }
                 let activeSpeaker = ranked.first.flatMap { best -> String? in
@@ -783,7 +802,22 @@ struct CameraView: View {
                                     color: colorForSpeaker(face.id)
                                 )
                             }
+
+                            // Each on-screen person's newest captions sit under their face.
+                            ForEach(controller.faces) { face in
+                                let own = captions.filter { $0.speakerID == face.id }.suffix(2)
+                                if !own.isEmpty {
+                                    SpeakerCaptionStack(
+                                        captions: Array(own),
+                                        faceBox: face.box,
+                                        size: geometry.size,
+                                        sourceAspectRatio: controller.captureAspectRatio
+                                    )
+                                    .allowsHitTesting(false)
+                                }
+                            }
                         }
+                        .animation(.easeOut(duration: 0.25), value: captions.map(\.id))
                     }
                     .ignoresSafeArea()
                 case .notDetermined, .configuring:
@@ -851,6 +885,51 @@ struct CameraView: View {
         }
         .foregroundStyle(.white)
         .padding()
+    }
+}
+
+/// Maps a normalized face box to view points for the aspect-fill preview.
+private func viewRect(for box: CGRect, in size: CGSize, sourceAspectRatio: CGFloat) -> CGRect {
+    let scale = max(size.width / sourceAspectRatio, size.height)
+    let renderedWidth = sourceAspectRatio * scale
+    let renderedHeight = scale
+    return CGRect(
+        x: box.minX * renderedWidth - (renderedWidth - size.width) / 2,
+        y: box.minY * renderedHeight - (renderedHeight - size.height) / 2,
+        width: box.width * renderedWidth,
+        height: box.height * renderedHeight
+    )
+}
+
+/// A speaker's captions anchored under their face box, or above it when the face is low in
+/// the frame, kept inside the preview horizontally.
+private struct SpeakerCaptionStack: View {
+    let captions: [LiveCaption]
+    let faceBox: CGRect
+    let size: CGSize
+    let sourceAspectRatio: CGFloat
+
+    var body: some View {
+        let face = viewRect(for: faceBox, in: size, sourceAspectRatio: sourceAspectRatio)
+        let width = min(290, size.width - 24)
+        let left = min(max(face.midX - width / 2, 12), size.width - width - 12)
+        let placeAbove = face.maxY > size.height * 0.6
+        let stack = VStack(alignment: .leading, spacing: 6) {
+            ForEach(captions) { CaptionBubbleView(caption: $0).transition(.opacity) }
+        }
+        .frame(width: width)
+
+        if placeAbove {
+            ZStack(alignment: .bottomLeading) {
+                Color.clear
+                stack.offset(x: left, y: -(size.height - face.minY + 26))
+            }
+        } else {
+            ZStack(alignment: .topLeading) {
+                Color.clear
+                stack.offset(x: left, y: face.maxY + 10)
+            }
+        }
     }
 }
 

@@ -10,6 +10,8 @@ import GraptionUI
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("meetingRetentionDays") private var retentionDays = 0
+    @AppStorage("toneTagsEnabled") private var toneTagsEnabled = true
+    @AppStorage(TranscriptionPreference.deepgramKey) private var deepgramEnabled = false
     @StateObject private var cameraController = CameraController()
     @State private var speakerByCaption: [UUID: String] = [:]
     @State private var captionRecorders: [UUID: SessionRecorder] = [:]
@@ -61,6 +63,8 @@ struct ContentView: View {
     @State private var captions: [CaptionEntry] = []
     /// Captions whose on-screen time is up. They leave the camera view but stay in the transcript.
     @State private var expiredCaptionIDs: Set<UUID> = []
+    /// Captions from before face ids restarted; they never anchor to the new f1, f2, ….
+    @State private var detachedCaptionIDs: Set<UUID> = []
     @State private var deferredExpiryIDs: Set<UUID> = []
     @State private var listenTask: Task<Void, Never>?
 
@@ -75,7 +79,8 @@ struct ContentView: View {
             .reversed()
             .map { entry in
                 LiveCaption(id: entry.id, speakerName: speakerLabel(entry.speakerID),
-                    toneTag: toneTags[entry.id], text: entry.text, speakerID: entry.speakerID)
+                    toneTag: toneTagsEnabled ? toneTags[entry.id] : nil, text: entry.text,
+                    speakerID: entry.speakerID)
             }
     }
 
@@ -84,6 +89,18 @@ struct ContentView: View {
     static func onScreenSeconds(for text: String) -> Double {
         let words = text.split(whereSeparator: \.isWhitespace).count
         return min(8, max(4, Double(words) / 2.5))
+    }
+
+    /// Captions whose speaker is on camera now; CameraView draws these under that face.
+    private var visibleFaceIDs: Set<String> { Set(cameraController.faces.map(\.id)) }
+
+    /// Everything else (nobody in view, or the speaker left the frame) stays at the bottom.
+    private var floatingCaptions: [LiveCaption] {
+        bubbleCaptions.filter { detachedCaptionIDs.contains($0.id) || !visibleFaceIDs.contains($0.speakerID) }
+    }
+
+    private var anchoredCaptions: [LiveCaption] {
+        bubbleCaptions.filter { !detachedCaptionIDs.contains($0.id) }
     }
 
     private func scheduleExpiry(of entry: CaptionEntry) {
@@ -114,7 +131,7 @@ struct ContentView: View {
         Group {
             if showSettings {
                 SettingsScreen(
-                    cameraPreviewDestination: { AnyView(CameraView(controller: cameraController, captions: bubbleCaptions)) },
+                    cameraPreviewDestination: { AnyView(CameraView(controller: cameraController, captions: anchoredCaptions)) },
                     onBack: {
                         showSettings = false
                         showHomeScreen = true
@@ -143,7 +160,8 @@ struct ContentView: View {
                             id: entry.id,
                             speaker: speakerLabel(entry.speakerID),
                             text: entry.text,
-                            tone: toneTags[entry.id], color: colorForSpeaker(entry.speakerID)
+                            tone: toneTagsEnabled ? toneTags[entry.id] : nil,
+                            color: colorForSpeaker(entry.speakerID)
                         )
                     },
                     onHome: {
@@ -172,8 +190,8 @@ struct ContentView: View {
                 )
             } else if isReady {
                 LiveCaptionScreen(
-                    cameraPreviewDestination: { AnyView(CameraView(controller: cameraController, captions: bubbleCaptions)) },
-                    captions: bubbleCaptions,
+                    cameraPreviewDestination: { AnyView(CameraView(controller: cameraController, captions: anchoredCaptions)) },
+                    captions: floatingCaptions,
                     soundAlert: bannerAlert,
                     isListening: isRecording || isCalibrating,
                     canListen: canListen,
@@ -299,6 +317,9 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { stopMicPreview() }
         }
+        .onChange(of: cameraController.idGeneration) {
+            detachedCaptionIDs.formUnion(captions.map(\.id))
+        }
         .onChange(of: useManualThreshold) { _, enabled in
             if enabled, manualThresholdDB == nil {
                 manualThresholdDB = initialManualThresholdDB
@@ -420,8 +441,10 @@ struct ContentView: View {
             defer { captionFinished() }
             let caption = delivery.result
             if isRecording, asrClient != nil {
-                status = caption.asrModelVersion.hasPrefix("mlx-whisper-")
-                    ? "Listening — Mac captions" : "Listening — iPhone captions"
+                let version = caption.asrModelVersion
+                status = version.hasPrefix("deepgram-") ? "Listening — Deepgram captions"
+                    : version.hasPrefix("mlx-whisper-") ? "Listening — Mac captions"
+                    : "Listening — iPhone captions"
             }
             // Retained for later queue/UI diagnostics: measures enqueue-to-callback
             // time, including queue wait and ASR, but not the actual visible frame.
@@ -511,6 +534,7 @@ struct ContentView: View {
         toneVersions.removeAll()
         toneTags.removeAll()
         expiredCaptionIDs.removeAll()
+        detachedCaptionIDs.removeAll()
         deferredExpiryIDs.removeAll()
         let manualDB = useManualThreshold ? (manualThresholdDB ?? initialManualThresholdDB) : nil
         capture.setManualThreshold(manualDB)
@@ -560,8 +584,10 @@ struct ContentView: View {
         do {
             closeASRConnection()
             var transcriber: any CaptionTranscriber = localTranscriber
-            let asrConfiguration = pairedMac == nil
-                ? ASRClientConfiguration.fromAppConfiguration() : pairedMac?.asrConfiguration
+            // WhisperKit on this iPhone unless Settings → Transcription opts in to the Mac
+            // (Deepgram or MLX there), which still falls back to WhisperKit per segment.
+            let asrConfiguration = !deepgramEnabled ? nil
+                : pairedMac?.asrConfiguration ?? ASRClientConfiguration.fromAppConfiguration()
             if let configuration = asrConfiguration {
                 let client = ASRClient(configuration: configuration)
                 asrClient = client

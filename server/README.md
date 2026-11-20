@@ -263,3 +263,24 @@ captions. **Generate summary** and **Ask** send the selected transcript text,
 speaker IDs and timestamps to OpenRouter on demand. The app requests providers
 with data collection disabled. Answers stay in browser memory. Each question
 uses the transcript as context. Standalone JSON imports remain available offline.
+
+## Optional Deepgram captions (ASR_BACKEND=deepgram)
+
+Set these in the repo-root `.env` (gitignored), then start the server with `./run_server.sh`:
+
+```bash
+ASR_BACKEND=deepgram
+DEEPGRAM_API_KEY=<your key>
+DEEPGRAM_MODEL=nova-3
+```
+
+On the phone, pair with the Mac, then turn on Settings → Transcription → **Deepgram via Mac**.
+Each completed speech segment goes phone → Mac `/ws/asr` → Deepgram's pre-recorded API with
+`mip_opt_out=true`. The Mac never writes the audio to disk or logs. If Deepgram fails or the
+reply takes longer than 2 seconds, the phone transcribes that segment with WhisperKit. The
+`/ws/asr` socket requires the pairing token whenever a real backend (`mlx` or `deepgram`) is set.
+
+## Demo tone default (TONE_FALLBACK_TAG)
+
+With `TONE_BACKEND=audeering`, segments that match no tone rule get `TONE_FALLBACK_TAG`
+(default `calm`) and a `+default-calm` suffix on `model_version`. Set it empty for `null`.

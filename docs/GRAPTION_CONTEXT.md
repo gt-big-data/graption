@@ -21,7 +21,7 @@ Example output:
 - **iOS only.** No Android.
 - **Training compute:** the team's M-series Macs (PyTorch on `mps`). Training is never part of the live app.
 - **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi for optional tone and ASR.
-- **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network. Tone may depend on a server; optional Mac ASR must fall back to on-device WhisperKit.
+- **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network. Tone may depend on a server; optional Mac ASR (MLX or Deepgram, opt-in) must fall back to on-device WhisperKit.
 - **User testing:** DHH testers use the app on their own phones at home via TestFlight. Their phones can't reach the dev Mac, which is why the tone server must also run in the cloud (or behind a tunnel).
 
 ### Non-goals (semester one)
@@ -221,7 +221,13 @@ result; otherwise it runs the same segment through locally prepared WhisperKit.
 
 Use the P4 build-configuration convention: an empty `ASR_URL` keeps captions
 on-device. Opting in with a development Mac base URL transmits completed speech
-segments. The client waits up to two seconds per attempt before local fallback;
+segments. Settings → Transcription → **Deepgram via Mac** (off by default) is the switch: off,
+captions are WhisperKit only; on, the app sends segments to the paired Mac's `/ws/asr`.
+With `ASR_BACKEND=deepgram` the Mac forwards each segment to Deepgram's pre-recorded API
+(`nova-3`, `mip_opt_out=true`), so that audio leaves the Mac for Deepgram; the key
+(`DEEPGRAM_API_KEY`) stays in the Mac's `.env` and never ships in the app. Real backends
+(`mlx`, `deepgram`) require the pairing token, and the app reuses its pairing token when the
+pairing predates ASR. The client waits up to two seconds per attempt before local fallback;
 slow remote attempts can add delay. The Mac uses an optional Apple Silicon MLX
 backend with a preprovisioned checkpoint or an unavailable mock by default.
 It never stores request audio. See `server/README.md` for setup.
@@ -260,7 +266,7 @@ For now the app has two ways to get landmarks, chosen by `LandmarkMode`. **`face
 **FaceTracker** (`GraptionVision/FaceTracker.swift`, unit-tested with `swift test`)
 - Greedy IoU matching of the current frame's faces to existing tracks (IoU ≥ 0.3), then a centroid-distance fallback (within 1.5× the face size) for fast movers.
 - Boxes are smoothed with a One Euro filter. A missed face coasts on its last velocity and is still shown for 2 frames, without landmarks.
-- Drop a track after 2s unseen; until then a returning face gets its old ID back. (Was 1s; on-device testing showed turning the head away and back often takes longer, and the face came back with a new ID. Tradeoff: someone new stepping into the same spot within 2s inherits the ID.) IDs are `f1`, `f2`, …, never reused within the camera controller lifetime; closing a preview does not restart numbering. Rotating the phone forgets all tracks (their boxes are in the old orientation), so faces get new IDs.
+- Drop a track after 2s unseen; until then a returning face gets its old ID back. (Was 1s; on-device testing showed turning the head away and back often takes longer, and the face came back with a new ID. Tradeoff: someone new stepping into the same spot within 2s inherits the ID.) IDs are `f1`, `f2`, …. In the app, numbering restarts at `f1` once every track has retired (nobody seen for 2 s; demo request 2026-11-20, `FaceTracker.restartsNumberingWhenEmpty`); captions from before the restart stay in the bottom column and never anchor to the new `f1`, and saved transcripts can then show two different people as the same speaker number. Rotation, camera flips and closing a preview forget tracks without restarting numbering. Rotating the phone forgets all tracks (their boxes are in the old orientation), so faces get new IDs.
 
 **Speaker guess (until SpeakerModel ships)**
 - Live capture now uses `MouthMotionScorer` behind `SpeakerScorer`: per-track jaw-open,
@@ -359,7 +365,7 @@ Math is float64 on both sides; the phone hands Core ML float32. The vectors aren
 - Emits a `caption` with `speaker_id` pending.
 - Stretch goal: streaming partial captions.
 
-**Fusion** (plain code, no ML)
+**Fusion** (plain code, no ML; demo attribution below)
 ```
 for caption [t0, t1]:
     for each face: mean smoothed p over frames in [t0, t1]
@@ -367,6 +373,16 @@ for caption [t0, t1]:
     speaker = best.face_id if best.p >= 0.5 and best.p - second.p >= 0.15 else "unknown"
 ```
 - `"unknown"` means off-screen or ambiguous. Show it as "Unknown speaker" in gray.
+- **Demo attribution (always name someone in view).** When the rule above returns `"unknown"`,
+  `CameraController.speaker(from:to:)` falls back to `SpeakerScoreBuffer.mostLikelySpeaker`:
+  the face with the highest mean mouth-motion score within 1 s of the segment (ties: the face
+  seen most often), then the highlighted face, then the largest face on screen. Captions are
+  `"unknown"` only when no face was tracked. This can name the wrong person; it exists so the
+  demo shows captions under people until the trained SpeakerModel replaces the heuristic.
+- **Placement.** Live captions whose speaker is on camera are drawn under that face's box
+  (above it when the face is in the lower 40% of the frame), newest two per person, clamped
+  to the preview. Captions for `"unknown"` or a speaker who left the frame stay in the
+  bottom column.
 - `SpeakerScoreBuffer` collects camera scores on the same host-clock origin supplied to
   microphone capture. Resolve each segment using P7's `captionSpeaker` when VAD delivers
   it, before ASR queue delays; the buffer retains 15s to cover the 10s maximum segment.
@@ -525,7 +541,13 @@ The web dashboard reads local exports in memory or loads synced meetings from th
   2. WavLM-base+ (frozen), `output_hidden_states=True`, giving 13 layers × T × 768.
   3. Learned softmax-weighted sum over the 13 layers, then mean-pool over time, giving a 768-dim vector.
   4. Head: `Linear(768,256) → ReLU → Dropout(0.3) → Linear(256,6) → softmax`.
-  5. Tag mapper (`emotion_tag` in `server/app/tone.py`): take the argmax emotion; if its prob is ≥ `TAG_THRESHOLD` (default 0.6), show its tag from the §9 mapping (happy → `excited`, anger → `upset`); every other case is `null`. `probs` always carries all 6 emotions, so logs keep what the model actually guessed.
+  5. Tag mapper (`emotion_tag` in `server/app/tone.py`): take the argmax emotion; if its prob is ≥ `TAG_THRESHOLD` (default 0.6), show its tag from the §9 mapping (happy → `excited`, anger → `upset`); every other case is `null`.
+- **Demo default tag (`TONE_FALLBACK_TAG`, default `calm`).** With the audEERING backend, a
+  segment that matches no rule (or is under 0.5 s) gets the fallback tag instead of `null`, and
+  that result's `model_version` gains a suffix (`audeering-msp-dim-a4+default-calm`) so logs
+  and saved meetings can tell a default from a detected tone. The mock backend still returns
+  `null`. Set `TONE_FALLBACK_TAG=` (empty) to restore "no confident tag → `null`". audEERING
+  results now also carry `scores` (arousal, valence, dominance). `probs` always carries all 6 emotions, so logs keep what the model actually guessed.
 - **Week-1 baseline mode** (`TONE_BACKEND=audeering`, implemented): the audEERING model outputs arousal, valence, and dominance in [0,1]. Map them with tunable thresholds (`AudeeringThresholds` in `server/app/tone.py`). These are the values tuned on team recordings in A4 (`ml/tone/DISCUSSION_LOG.md`), replacing the original 0.65/0.55/0.4/0.3 guesses:
   - arousal > 0.64 and valence > 0.45 → `excited`
   - arousal > 0.47 and valence < 0.4 → `upset`
@@ -631,7 +653,9 @@ The mapping is `EMOTION_TAGS` in `server/app/tone.py`, applied by `emotion_tag` 
 
 **Feature:** a post-session "catch me up" summary/notes built from the caption log (speaker + text + tone), shown in the past-meetings dashboard (section 6).
 - **Mac dashboard:** a synced meeting supports an on-demand summary and transcript questions
-  through OpenRouter. The Mac holds `OPENROUTER_API_KEY` and requires the server bearer
+  through OpenAI when `OPENAI_API_KEY` is set in the Mac's `.env` (`OPENAI_MODEL`, default
+  `gpt-4.1-mini`, `store: false`; demo decision 2026-11-20, Mac only, never the iOS app),
+  otherwise through OpenRouter. The Mac holds `OPENROUTER_API_KEY` and requires the server bearer
   credential for AI requests. OpenRouter settings are read from the repository-root `.env`
   on each request, taking precedence over inherited shell variables. Environment variables
   supply settings absent from that file. Only the caption text, speaker IDs, timestamps and the requested question leave
@@ -745,6 +769,14 @@ If the device is overloaded, degrade in this order:
 - **No PACE; train on team Macs:** we don't have PACE access. The tone head trains on frozen WavLM embeddings in minutes, and the speaker GRU is about 50k params, so M-series Macs (`mps`) are enough. Datasets and recordings go in a shared Google Drive folder; AVA may need to be a subset.
 - **CREMA-D, not MSP-Podcast; openSMILE dropped:** no license paperwork. The audEERING baseline (trained on MSP-Podcast) gives natural-speech coverage for free. Both remain stretch goals, used only if tests show gaps.
 - **Tone never blocks captions,** and tone tags only show when confident. A wrong tag is worse than none for DHH users.
+- **Demo overrides (2026-11-20, for the showcase):** tone defaults to `calm` when nothing is
+  detected, and captions always attach to a face in view. Both deliberately trade the
+  "wrong is worse than none" rule for a demo that always shows a speaker and a tone; both are
+  marked (`+default-calm` model version, documented fallback order) and reversible
+  (`TONE_FALLBACK_TAG=`; drop the fallback in `CameraController.speaker`). Revisit before
+  user testing with DHH testers.
+- **Deepgram as opt-in cloud captions:** routed through the Mac so the API key never ships in
+  the app; off by default so captions stay offline-first, with per-segment WhisperKit fallback.
 - **Recoverable request errors (schema v1.1):** return descriptive `session_error` messages with the received request so manual clients can correct mistakes without reconnecting. Never log or store the echoed payload.
 - **Custom tone tags reuse the baseline's words:** happy → `excited`, anger → `upset`, everything else → `null` (§9), so the UI shows one vocabulary whichever backend runs. Sad, fear and disgust stay hidden until team recordings show they're reliable; `calm` has no CREMA-D training data. Schema text-only change, no version bump.
 - **Rule-based fusion before learned fusion:** it produces the logged data a learned version would need.

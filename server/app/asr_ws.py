@@ -12,7 +12,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from app.asr import ASRBackend, ASRPrediction
+from app.asr import ASRBackend, ASRPrediction, asr_requires_pairing
 from app.events import ASRRequest, ASRResult, SessionError
 from app.observability import record
 from app.pairing import server_token
@@ -30,9 +30,7 @@ def reject_constant(value: str) -> None:
 async def asr_session(websocket: WebSocket, session_id: str = Query(min_length=1)) -> None:
     backend: ASRBackend = websocket.app.state.asr_backend
     connection_id = str(uuid4())
-    token = os.getenv("ASR_TOKEN") or (
-        server_token() if os.getenv("ASR_BACKEND", "").strip().lower() == "mlx" else ""
-    )
+    token = os.getenv("ASR_TOKEN") or (server_token() if asr_requires_pairing() else "")
     auth = websocket.headers.get("authorization", "")
     if (os.getenv("DEPLOY_MODE", "local") != "local" and not token) or (
         token and not compare_digest(auth.encode(), f"Bearer {token}".encode())

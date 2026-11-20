@@ -101,6 +101,24 @@ final class FaceTrackerTests: XCTestCase {
         XCTAssertEqual(ids(tracker.update(with: [face(0.1, 0.1)], at: 4.1)), ["f3"])
     }
 
+    func testNumberingRestartsOnlyAfterEveryoneLeaves() {
+        var tracker = FaceTracker()
+        tracker.restartsNumberingWhenEmpty = true
+        _ = tracker.update(with: [face(0.1, 0.1), face(0.6, 0.6)], at: 0)
+        // f1 leaves while f2 stays: no restart, a newcomer is f3.
+        _ = tracker.update(with: [face(0.6, 0.6)], at: 2.1)
+        XCTAssertEqual(ids(tracker.update(with: [face(0.6, 0.6), face(0.1, 0.1)], at: 2.2)), ["f2", "f3"])
+        XCTAssertEqual(tracker.numberingGeneration, 0)
+        // A brief gap keeps ids.
+        _ = tracker.update(with: [], at: 3)
+        XCTAssertEqual(ids(tracker.update(with: [face(0.6, 0.6), face(0.1, 0.1)], at: 3.5)), ["f2", "f3"])
+        // Nobody for over 2 s: numbering restarts at f1.
+        _ = tracker.update(with: [], at: 6)
+        XCTAssertEqual(tracker.numberingGeneration, 1)
+        XCTAssertEqual(ids(tracker.update(with: [face(0.3, 0.3)], at: 6.1)), ["f1"])
+        XCTAssertEqual(ids(tracker.update(with: [face(0.3, 0.3), face(0.7, 0.7)], at: 6.2)), ["f1", "f2"])
+    }
+
     func testResetStartsANewSession() {
         var tracker = FaceTracker()
         _ = tracker.update(with: [face(0.1, 0.1), face(0.6, 0.6)], at: 0)

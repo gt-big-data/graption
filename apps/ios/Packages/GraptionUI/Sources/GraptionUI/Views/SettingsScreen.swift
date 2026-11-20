@@ -5,6 +5,7 @@ import VisionKit
 public struct SettingsScreen: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("toneTagsEnabled") private var toneTagsEnabled: Bool = true
+    @AppStorage(TranscriptionPreference.deepgramKey) private var deepgramEnabled = false
     @State private var showCameraPreview = false
     @State private var showPairingScanner = false
     @State private var isPairing = false
@@ -59,6 +60,7 @@ public struct SettingsScreen: View {
                 VStack(alignment: .leading, spacing: 16) {
                     macServerCard
                     accessibilityCard
+                    transcriptionCard
                     if let manualThresholdDB {
                         speechDetectionCard(threshold: manualThresholdDB)
                     }
@@ -214,6 +216,36 @@ public struct SettingsScreen: View {
             }
 
             Text("Changes apply immediately and save automatically on this iPhone.")
+                .font(.footnote)
+                .foregroundStyle(Color.graptionSecondaryText)
+        }
+    }
+
+    private var transcriptionCard: some View {
+        SettingsCard {
+            Text("Transcription")
+                .font(.title3.bold())
+                .foregroundStyle(Color.graptionAccent)
+
+            Toggle("Deepgram via Mac", isOn: $deepgramEnabled)
+                .font(.subheadline.bold())
+                .foregroundStyle(Color.graptionAccent)
+                .tint(Color.graptionAccent)
+
+            Text(deepgramEnabled
+                ? "Each finished sentence goes to the paired Mac, which transcribes it with Deepgram. "
+                    + "If the Mac or Deepgram doesn't answer within 2 seconds, this iPhone transcribes it instead."
+                : "Off: WhisperKit transcribes on this iPhone, and captions work offline.")
+                .font(.footnote)
+                .foregroundStyle(Color.graptionSecondaryText)
+
+            if deepgramEnabled, pairedMacName == nil {
+                Text("Pair a Mac above first. Until then, captions stay on this iPhone.")
+                    .font(.footnote.bold())
+                    .foregroundStyle(Color.graptionPeach)
+            }
+
+            Text("Applies the next time you start listening.")
                 .font(.footnote)
                 .foregroundStyle(Color.graptionSecondaryText)
         }
@@ -399,4 +431,9 @@ private struct PairingScanner: UIViewControllerRepresentable {
         SettingsScreen()
     }
     .dynamicTypeSize(.accessibility5)
+}
+
+/// Shared settings key so the app target reads the same switch the Settings screen writes.
+public enum TranscriptionPreference {
+    public static let deepgramKey = "deepgramTranscriptionEnabled"
 }
