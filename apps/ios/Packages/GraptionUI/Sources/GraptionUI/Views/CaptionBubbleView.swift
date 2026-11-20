@@ -7,7 +7,7 @@ struct CaptionBubbleView: View {
     private let seeThrough = 0.68
 
     var body: some View {
-        let speakerColor = colorForSpeaker(caption.speakerName)
+        let speakerColor = colorForSpeaker(caption.speakerID)
 
         return VStack(alignment: .leading, spacing: 6) {
             Text(caption.speakerName)

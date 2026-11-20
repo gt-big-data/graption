@@ -6,13 +6,15 @@ import Foundation
 /// late by `caption_id`.
 public struct LiveCaption: Identifiable, Equatable {
     public let id: UUID
+    public var speakerID: String
     public var speakerName: String
     public var toneTag: String?
     public var text: String
 
-    public init(id: UUID = UUID(), speakerName: String, toneTag: String? = nil, text: String) {
+    public init(id: UUID = UUID(), speakerName: String, toneTag: String? = nil, text: String, speakerID: String? = nil) {
         self.id = id
         self.speakerName = speakerName
+        self.speakerID = speakerID ?? speakerName
         self.toneTag = toneTag
         self.text = text
     }

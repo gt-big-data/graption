@@ -202,3 +202,64 @@ Set `ASR_TOKEN` in the server environment and local iOS configuration if using
 authentication (required outside local deployment mode). Use plain WS only on a
 trusted local network. Keep uvicorn frame logging disabled. Both app and server
 must use schema 1.3; rebuild the phone app when updating the server.
+
+
+### Saved meetings and web dashboard
+
+Real iPhone microphone sessions now save caption text locally as results arrive.
+Stop finalizes the meeting after queued transcriptions finish. With `TONE_URL`
+configured, the app also retries text-only JSON sync every 15 seconds while active,
+including after a later app launch. No meeting-sync audio or video is stored or sent.
+The server bearer credential protects upload and dashboard read endpoints once paired,
+or when a manual `TONE_TOKEN` is configured. This is a shared development store.
+
+`POST /api/meetings` accepts v1/v2 session exports and upserts meetings by
+UUID. `GET /api/meetings` returns a v2 export the dashboard can read. The database
+is `data/meetings.sqlite3` by default; set `MEETINGS_DB` to a persistent path to
+retain meetings across server replacement (especially with ephemeral cloud disks).
+
+Build the web app with `cd apps/web && npm ci && npm run build`, then start/restart
+the server on `0.0.0.0` and open `http://localhost:8000/graption/` on the Mac.
+Choose **Pair an iPhone or iPad**, then **Connection & Preferences → Scan pairing
+code** in Graption. Keep both devices on the same trusted network and allow the app
+local-network access. The code uses the Mac's Bonjour `.local` name and expires after
+two minutes or one successful scan. The device saves the connection in Keychain
+and the dashboard saves its access in that browser. The server uses
+`data/meetings.pairing-token` by default, alongside its database. Keep that file
+when restarting or moving the server. Set `GRAPTION_PAIR_URL` to a reachable
+`wss://` or `ws://<hostname>.local:<port>` only if automatic addressing is unsuitable.
+
+Click **Load / refresh from server** to fetch saved meetings. For `npm run dev`,
+Vite proxies `/api` to `http://127.0.0.1:8000`. The standalone hosted dashboard
+supports manual JSON imports. Server loading requires the same-origin API or a proxy.
+
+The v2 export adds sound events (time, confidence, model version), tone probabilities
+or baseline dimensional scores, meeting titles, and redacted deletion markers. The
+phone's Saved sessions swipe actions rename/delete meetings. Retention is selectable
+(forever/7/30/90 days); deletions propagate when the phone next syncs. A deleted UUID
+cannot be resurrected by an older upload. Existing v1 JSON imports remain supported.
+The dashboard displays numbered speakers with the same ID-based colors as the phone,
+plus sound alerts and expandable tone details. Refresh replaces its previous server
+snapshot so deleted meetings disappear. Separately exported files remain unchanged.
+
+Speaker attribution uses a provisional mouth-motion heuristic. Sync resumes while the
+app is active.
+
+### Optional meeting AI (OpenRouter)
+
+Put `OPENROUTER_API_KEY` in the gitignored **repository-root `.env`** on the Mac.
+The dashboard gets its server credential from the pairing workflow.
+The default model is `anthropic/claude-haiku-5.5`.
+`OPENROUTER_MODEL` selects another explicit non-OpenAI model.
+
+After building the dashboard, start or restart the Mac server from the repo root.
+
+```bash
+uv run --directory server --env-file ../.env uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+In `/graption/`, load synced meetings and open one with
+captions. **Generate summary** and **Ask** send the selected transcript text,
+speaker IDs and timestamps to OpenRouter on demand. The app requests providers
+with data collection disabled. Answers stay in browser memory. Each question
+uses the transcript as context. Standalone JSON imports remain available offline.

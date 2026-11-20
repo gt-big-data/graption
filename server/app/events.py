@@ -184,7 +184,7 @@ class ToneResult(BaseModel):
     session_id: SessionId
     schema_version: SchemaVersion
     caption_id: CaptionId
-    tag: Annotated[str | None, Field(examples=["happy"])]
+    tag: Annotated[str | None, Field(examples=["excited"])]
     probs: Probs | None = None
     scores: Scores | None = None
     model_version: Annotated[str, Field(examples=["tone-head-v2"])]

@@ -71,7 +71,7 @@ def test_extra_fields_are_rejected(path, field):
     assert not VALIDATOR.is_valid(export)
 
 
-@pytest.mark.parametrize("version", ["2", 1])
+@pytest.mark.parametrize("version", ["3", 1])
 def test_wrong_export_version_is_rejected(version):
     export = copy.deepcopy(EXAMPLE)
     export["export_version"] = version

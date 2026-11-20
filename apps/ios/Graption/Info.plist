@@ -32,7 +32,7 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Graption uses the camera to see who is speaking.</string>
+	<string>Graption uses the camera to see who is speaking and scan Mac pairing codes.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Graption connects to the development caption and tone servers on your local network.</string>
 	<key>UIApplicationSceneManifest</key>

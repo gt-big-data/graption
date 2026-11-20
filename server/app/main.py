@@ -2,13 +2,18 @@
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.asr import create_asr_backend
 from app.asr_ws import router as asr_router
+from app.meeting_ai import router as meeting_ai_router
+from app.meetings import router as meetings_router
 from app.observability import close_logging, configure_logging, record
+from app.pairing import router as pairing_router
 from app.tone import create_backend
 from app.ws import router
 
@@ -37,7 +42,24 @@ def create_app(*, verbose: bool = False) -> FastAPI:
     app.state.asr_backend = create_asr_backend()
     app.include_router(router)
     app.include_router(asr_router)
+    app.include_router(meetings_router)
+    app.include_router(meeting_ai_router)
+    app.include_router(pairing_router)
     app.add_api_route("/health", health, response_class=PlainTextResponse)
+    dashboard = Path(__file__).resolve().parents[2] / "apps/web/dist"
+    dashboard_built = (dashboard / "index.html").is_file()
+    if dashboard_built:
+        app.mount("/graption", StaticFiles(directory=dashboard, html=True), name="dashboard")
+
+    @app.get("/", include_in_schema=False)
+    async def dashboard_home():
+        if dashboard_built:
+            return RedirectResponse("/graption/")
+        return PlainTextResponse(
+            "From apps/web, run npm ci && npm run build, then restart Graption.",
+            status_code=503,
+        )
+
     return app
 
 

@@ -14,6 +14,7 @@ public final class MicrophoneCapture {
     private let engine = AVAudioEngine()
     private let vad: EnergyVAD
     private let soundDetector: SoundDetector?
+    private let loudnessMeter: LoudnessMeter?
 
     private var worker: AudioWorker?
     private var isCapturing = false
@@ -22,14 +23,16 @@ public final class MicrophoneCapture {
     public var onSoundAlert: ((SoundAlert) -> Void)?
     public var onError: ((Error) -> Void)?
 
-    // The sound detector shares the same converted mic stream
-    // as the VAD. Pass nil to capture speech only.
+    // The sound detector and loudness meter share the same converted
+    // mic stream as the VAD. Pass nil to capture speech only.
     public init(
         vad: EnergyVAD,
-        soundDetector: SoundDetector? = nil
+        soundDetector: SoundDetector? = nil,
+        loudnessMeter: LoudnessMeter? = nil
     ) {
         self.vad = vad
         self.soundDetector = soundDetector
+        self.loudnessMeter = loudnessMeter
     }
 
     public var currentThreshold: Float { vad.threshold }
@@ -85,12 +88,14 @@ public final class MicrophoneCapture {
             }
 
             if calibrating { vad.beginCalibration() } else { vad.reset() }
+            loudnessMeter?.reset()
 
             let worker = AudioWorker(
                 converter: converter,
                 outputFormat: outputFormat,
                 vad: vad,
                 soundDetector: soundDetector,
+                loudnessMeter: loudnessMeter,
                 sessionStartHostTime:
                     sessionStartHostTime ?? mach_absolute_time(),
                 deliver: { [weak self] segment in
@@ -224,6 +229,7 @@ private final class AudioWorker: @unchecked Sendable {
     private let outputFormat: AVAudioFormat
     private let vad: EnergyVAD
     private let soundDetector: SoundDetector?
+    private let loudnessMeter: LoudnessMeter?
     private let sessionStartHostTime: UInt64
 
     private let deliver: @MainActor @Sendable (AudioSegment) -> Void
@@ -237,6 +243,7 @@ private final class AudioWorker: @unchecked Sendable {
         outputFormat: AVAudioFormat,
         vad: EnergyVAD,
         soundDetector: SoundDetector?,
+        loudnessMeter: LoudnessMeter?,
         sessionStartHostTime: UInt64,
         deliver: @escaping @MainActor @Sendable (AudioSegment) -> Void,
         deliverAlert: @escaping @MainActor @Sendable (SoundAlert) -> Void,
@@ -246,6 +253,7 @@ private final class AudioWorker: @unchecked Sendable {
         self.outputFormat = outputFormat
         self.vad = vad
         self.soundDetector = soundDetector
+        self.loudnessMeter = loudnessMeter
         self.sessionStartHostTime = sessionStartHostTime
         self.deliver = deliver
         self.reportError = reportError
@@ -364,6 +372,11 @@ private final class AudioWorker: @unchecked Sendable {
                 outputSampleCount += samples.count
 
                 soundDetector?.process(
+                    samples: samples,
+                    tStart: timestamp
+                )
+
+                loudnessMeter?.process(
                     samples: samples,
                     tStart: timestamp
                 )
