@@ -319,12 +319,18 @@ Math is float64 on both sides; the phone hands Core ML float32. The vectors aren
   reset, or calibration; never emit an idle-only segment. This cannot recover speech
   missed entirely by the energy threshold.
 - Start energy-based, then switch to Silero.
-- Tapping listen calibrates automatically for 3 seconds. A centered countdown says "Calibrating",
+- In Auto mode, tapping Listen calibrates for 3 seconds. A centered countdown says "Calibrating",
   shows 3, 2, 1, and "Keep the room quiet", then captions start. Threshold = max(0.001, 2 × the 90th-percentile RMS of fixed 20 ms windows)
   from that stretch. At least 2 seconds of audio are required; otherwise the previous threshold
   is kept. Calibration emits no segments, stores no audio, and applies only for the current app
   instance. This provisional energy heuristic can miss quiet speech and does not distinguish
   speech from noise.
+- Settings offers a manual threshold for the current app run. Manual mode skips the Listen
+  countdown and uses the selected value from −60 to 0 dBFS (1 dB steps), converted to
+  linear RMS. Returning to Auto restores room calibration on the next Listen. The optional
+  mic preview compares the peak chunk RMS since the last meter refresh with the selected
+  threshold, without emitting captions or sound alerts. It stops when leaving Settings
+  or when the app backgrounds.
 
 **WhisperKit**
 - First launch with no local model shows a blank Install base.en page that says Wi-Fi is needed. Later launches load the local copy and caption offline.

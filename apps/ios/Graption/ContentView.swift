@@ -5,6 +5,7 @@ import GraptionUI
 
 @MainActor
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showHomeScreen = true
     @State private var showTranscript = false
     @State private var showSettings = false
@@ -28,7 +29,12 @@ struct ContentView: View {
     @State private var isCalibrating = false
     @State private var calibrationCount: Int?
     @State private var isStarting = false
-    @State private var threshold: Float = 0.001
+    @State private var useManualThreshold = false
+    @State private var manualThresholdDB: Double?
+    @State private var previewCapture: MicrophoneCapture?
+    @State private var previewTask: Task<Void, Never>?
+    @State private var previewLevel: Float = 0
+    @State private var previewError: String?
     @State private var isPreparing = false
     @State private var isReady = false
     @State private var status = "Loading base.en…"
@@ -81,8 +87,22 @@ struct ContentView: View {
                     onBack: {
                         showSettings = false
                         showHomeScreen = true
-                    }
+                    },
+                    manualThresholdDB: Binding(
+                        get: { manualThresholdDB ?? initialManualThresholdDB },
+                        set: { manualThresholdDB = $0 }
+                    ),
+                    manualThresholdEnabled: $useManualThreshold,
+                    micPreviewActive: previewCapture != nil,
+                    micPreviewLevel: Double(previewLevel),
+                    micPreviewBreached: previewLevel >= EnergyVAD.rmsThreshold(
+                        decibels: manualThresholdDB ?? initialManualThresholdDB
+                    ),
+                    micPreviewError: previewError,
+                    onToggleMicPreview: toggleMicPreview,
+                    onStopMicPreview: stopMicPreview
                 )
+                .onDisappear { stopMicPreview() }
             } else if showTranscript {
                 TranscriptScreen(
                     captions: captions.map { entry in
@@ -137,7 +157,7 @@ struct ContentView: View {
                     onHome: {
                         // Leaving live captions turns the microphone off; the
                         // screen-level .onDisappear doesn't fire for in-place swaps.
-                        if isRecording || isCalibrating { stopListening() }
+                        if isRecording || isCalibrating || isStarting { stopListening() }
                         showHomeScreen = true
                     },
                     onTranscript: {
@@ -177,7 +197,19 @@ struct ContentView: View {
                 report(error)
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { stopMicPreview() }
+        }
+        .onChange(of: useManualThreshold) { _, enabled in
+            if enabled, manualThresholdDB == nil {
+                manualThresholdDB = initialManualThresholdDB
+            } else if !enabled {
+                stopMicPreview()
+                previewError = nil
+            }
+        }
         .onDisappear {
+            stopMicPreview()
             isVisible = false
             toneMonitor.stop()
             listenTask?.cancel()
@@ -192,6 +224,58 @@ struct ContentView: View {
             isCalibrating = false
             calibrationCount = nil
         }
+    }
+
+    private var initialManualThresholdDB: Double {
+        let rms = Double(capture?.automaticThreshold ?? 0.001)
+        return min(0, max(-60, (20 * log10(rms)).rounded()))
+    }
+
+    private func toggleMicPreview() {
+        if previewCapture != nil {
+            stopMicPreview()
+            return
+        }
+        guard !isStarting, !isRecording, !isCalibrating else {
+            previewError = "Stop listening before previewing the microphone."
+            return
+        }
+        previewError = nil
+        let preview = MicrophoneCapture(vad: EnergyVAD(threshold: 0.001))
+        previewCapture = preview
+        previewTask = Task {
+            let granted = await preview.requestPermission()
+            guard !Task.isCancelled, previewCapture === preview,
+                  showSettings, useManualThreshold, scenePhase != .background else { return }
+            guard granted else {
+                stopMicPreview()
+                previewError = "Microphone permission denied."
+                return
+            }
+            preview.onError = { [weak preview] error in
+                guard let preview, previewCapture === preview else { return }
+                stopMicPreview()
+                previewError = error.localizedDescription
+            }
+            do {
+                try preview.start(previewLevel: { [weak preview] level in
+                    guard let preview, previewCapture === preview else { return }
+                    previewLevel = level
+                })
+            } catch {
+                stopMicPreview()
+                previewError = error.localizedDescription
+            }
+        }
+    }
+
+    private func stopMicPreview() {
+        previewTask?.cancel()
+        previewTask = nil
+        let preview = previewCapture
+        previewCapture = nil
+        previewLevel = 0
+        preview?.stop()
     }
 
     private func configureCallbacks() {
@@ -296,33 +380,37 @@ struct ContentView: View {
         soundAlertModel.clear()
         captions.removeAll()
         expiredCaptionIDs.removeAll()
-        do {
-            try capture.start(calibrating: true)
-        } catch {
-            report(error)
-            return
-        }
-        isCalibrating = true
-        status = "Keep the room quiet"
-        for count in [3, 2, 1] {
-            guard !Task.isCancelled, isVisible, isCalibrating else { return }
-            calibrationCount = count
+        let manualDB = useManualThreshold ? (manualThresholdDB ?? initialManualThresholdDB) : nil
+        capture.setManualThreshold(manualDB)
+        if manualDB == nil {
             do {
-                try await Task.sleep(for: .seconds(1))
+                try capture.start(calibrating: true)
             } catch {
+                report(error)
                 return
             }
-        }
-        guard !Task.isCancelled, isVisible, isCalibrating else { return }
-        calibrationCount = nil
-        isCalibrating = false
-        do {
-            threshold = try capture.stopCalibration()
-            print(String(format: "Calibrated RMS threshold: %.6f", threshold))
-        } catch {
-            capture.stop()
-            report(error)
-            return
+            isCalibrating = true
+            status = "Keep the room quiet"
+            for count in [3, 2, 1] {
+                guard !Task.isCancelled, isVisible, isCalibrating else { return }
+                calibrationCount = count
+                do {
+                    try await Task.sleep(for: .seconds(1))
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled, isVisible, isCalibrating else { return }
+            calibrationCount = nil
+            isCalibrating = false
+            do {
+                let threshold = try capture.stopCalibration()
+                logSpeechThreshold(threshold, mode: "Calibrated")
+            } catch {
+                capture.stop()
+                report(error)
+                return
+            }
         }
         guard !Task.isCancelled, isVisible else { return }
         do {
@@ -341,11 +429,21 @@ struct ContentView: View {
             try Task.checkCancellation()
             guard isVisible else { return }
             try capture.start()
+            if manualDB != nil {
+                logSpeechThreshold(capture.currentThreshold, mode: "Manual")
+            }
             isRecording = true
             status = "Listening"
         } catch {
             report(error)
         }
+    }
+
+    private func logSpeechThreshold(_ rms: Float, mode: String) {
+        #if DEBUG
+        let decibels = 20 * log10(Double(rms))
+        print(String(format: "%@ RMS threshold: %.6f (%.1f dBFS)", mode, rms, decibels))
+        #endif
     }
 
     private func stopListening() {

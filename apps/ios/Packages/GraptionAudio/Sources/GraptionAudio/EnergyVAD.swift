@@ -15,7 +15,17 @@ public final class EnergyVAD {
     private var preRollSamples: [Float] = []
     private let maxPreRollSamples = 4_800
 
-    public private(set) var threshold: Float
+    public private(set) var automaticThreshold: Float
+    private var manualThreshold: Float?
+    public var threshold: Float { manualThreshold ?? automaticThreshold }
+
+    public static func rmsThreshold(decibels: Double) -> Float {
+        Float(pow(10, decibels / 20))
+    }
+
+    func setManualThreshold(_ decibels: Double?) {
+        manualThreshold = decibels.map(Self.rmsThreshold)
+    }
     private var isCalibrating = false
     private var calibrationLevels: [Float] = []
     private var calibrationEnergy: Double = 0
@@ -27,7 +37,7 @@ public final class EnergyVAD {
 
     public init(threshold: Float) {
         precondition(threshold.isFinite && threshold > 0)
-        self.threshold = threshold
+        self.automaticThreshold = threshold
     }
 
     /// Collect ambient noise only; no segments are emitted in this mode.
@@ -44,8 +54,8 @@ public final class EnergyVAD {
         let sorted = calibrationLevels.sorted()
         let noise = sorted[Int(ceil(Double(sorted.count) * 0.9)) - 1]
         // Twice the 90th-percentile RMS (~6 dB margin); isolated spikes do not dominate.
-        threshold = max(0.001, noise * 2)
-        return threshold
+        automaticThreshold = max(0.001, noise * 2)
+        return automaticThreshold
     }
 
     public func process(
@@ -82,7 +92,7 @@ public final class EnergyVAD {
             let chunk = Array(samples[offset..<(offset + count)])
             let chunkStart = tStart + Double(offset) / sampleRate
             let duration = Double(count) / sampleRate
-            let isSpeech = rms(chunk) >= threshold
+            let isSpeech = Self.rms(chunk) >= threshold
 
             // Begin a segment when speech is detected while idle.
             if isSpeech && segmentStart == nil {
@@ -180,7 +190,7 @@ public final class EnergyVAD {
         return segment
     }
 
-    private func rms(_ samples: [Float]) -> Float {
+    static func rms(_ samples: [Float]) -> Float {
         guard !samples.isEmpty else { return 0 }
 
         let meanSquare = samples.reduce(Float(0)) {
