@@ -156,7 +156,7 @@ export default function App() {
   const onDrop = (event: DragEvent) => { event.preventDefault(); void load(event.dataTransfer.files); };
   const session = sessions.find(item => item.id === selected);
   const results = searchMeetings(sessions, query);
-  return <main><header><h1>Graption meetings</h1><p>Open local exports or load meetings synced from your iPhone.</p></header>
+  return <main><header><div className="brand"><svg className="mark" viewBox="0 0 64 58" aria-hidden="true"><circle cx="22" cy="12" r="9" /><circle cx="42" cy="12" r="9" /><path d="M10 26h44a6 6 0 0 1 6 6v12a6 6 0 0 1-6 6H36l-4 8-4-8H10a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z" /><circle className="dot" cx="24" cy="36" r="2.6" /><circle className="dot" cx="32" cy="36" r="2.6" /><circle className="dot" cx="40" cy="36" r="2.6" /></svg><div><h1>Graption</h1><p className="eyebrow">Meetings</p></div></div><p>Open local exports or load meetings synced from your iPhone.</p></header>
     <section aria-label="Server meetings">
       <h2>Synced meetings</h2>
       <div className="server-actions">
