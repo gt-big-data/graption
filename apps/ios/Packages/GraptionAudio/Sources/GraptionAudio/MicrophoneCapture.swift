@@ -20,6 +20,9 @@ public final class MicrophoneCapture {
     private var isCapturing = false
 
     public var onSegment: ((AudioSegment) -> Void)?
+    /// Snapshots of the in-progress segment (same caption ID as the final
+    /// segment) for provisional transcription while speech continues.
+    public var onPartialSegment: ((AudioSegment) -> Void)?
     public var onSoundAlert: ((SoundAlert) -> Void)?
     public var onError: ((Error) -> Void)?
 
@@ -109,6 +112,9 @@ public final class MicrophoneCapture {
                     sessionStartHostTime ?? mach_absolute_time(),
                 deliver: { [weak self] segment in
                     self?.onSegment?(segment)
+                },
+                deliverPartial: { [weak self] segment in
+                    self?.onPartialSegment?(segment)
                 },
                 deliverAlert: { [weak self] alert in
                     self?.onSoundAlert?(alert)
@@ -259,6 +265,7 @@ private final class AudioWorker: @unchecked Sendable {
         previewLevel: (@MainActor @Sendable (Float) -> Void)?,
         sessionStartHostTime: UInt64,
         deliver: @escaping @MainActor @Sendable (AudioSegment) -> Void,
+        deliverPartial: @escaping @MainActor @Sendable (AudioSegment) -> Void,
         deliverAlert: @escaping @MainActor @Sendable (SoundAlert) -> Void,
         reportError: @escaping @MainActor @Sendable (Error) -> Void
     ) {
@@ -271,6 +278,13 @@ private final class AudioWorker: @unchecked Sendable {
         self.previewLevel = previewLevel
         self.deliver = deliver
         self.reportError = reportError
+
+        // Provisional snapshots ride the same main-actor delivery as finals.
+        vad.onPartialSegment = { segment in
+            DispatchQueue.main.async {
+                deliverPartial(segment)
+            }
+        }
 
         // Alerts don't wait for a VAD segment to finish.
         soundDetector?.start { alert in

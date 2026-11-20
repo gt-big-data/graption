@@ -88,7 +88,7 @@ Long-term, the tone model moves on-device (Core ML), which removes the server en
 |---|---|
 | iOS app | Swift, SwiftUI, AVFoundation (capture), Core ML, URLSessionWebSocketTask |
 | Face features | MediaPipe Face Landmarker (iOS SDK in the app, `mediapipe` Python on PACE), installed from the Google MediaPipe Swift package, **same `.task` model file in both** |
-| Transcription | WhisperKit (on-device Whisper). Start with `base.en`, benchmark `small.en` |
+| Transcription | WhisperKit (on-device Whisper), `small.en` (switched from `base.en` 2026-11-19 for ~⅓ fewer word errors; watch partial-caption latency on device) |
 | VAD | Energy-based first; upgrade to Silero VAD |
 | Sound events | Apple SoundAnalysis built-in classifier (`SNClassifySoundRequest`, `.version1`) |
 | Speaker model | PyTorch GRU, exported with `coremltools` to `.mlpackage` |
@@ -338,7 +338,19 @@ Math is float64 on both sides; the phone hands Core ML float32. The vectors aren
   reset, or calibration; never emit an idle-only segment. This cannot recover speech
   missed entirely by the energy threshold.
 - Start energy-based, then switch to Silero.
-- In Auto mode, tapping Listen calibrates for 3 seconds. A centered countdown says "Calibrating",
+- The app opens on the live captions screen (Home is reached from it) and the
+  microphone starts automatically once the ASR model is ready; tapping
+  Start/Stop still works, and a manual Stop is respected until the live
+  screen is re-entered or the app returns to the foreground.
+- **Quick start is the default** (Settings → Speech Detection → "Quick start
+  (skip calibration)", persisted): starting listening skips the calibration
+  countdown and uses a low fixed threshold of −60 dBFS (0.001 RMS, the
+  EnergyVAD floor) so captions begin immediately. This favors picking up
+  quiet speech (e.g. demo rooms where speakers will not stay quiet for a
+  calibration), at the cost of more noise-triggered segments in loud rooms.
+  The manual threshold, when enabled, takes precedence over quick start.
+- With quick start off, Auto mode calibrates for 3 seconds when listening
+  starts. A centered countdown says "Calibrating",
   shows 3, 2, 1, and "Keep the room quiet", then captions start. Threshold = max(0.001, 2 × the 90th-percentile RMS of fixed 20 ms windows)
   from that stretch. **Skip calibration** starts captions with the previous threshold (0.001
   before any successful calibration). Captions also start with that threshold if less than
@@ -354,10 +366,19 @@ Math is float64 on both sides; the phone hands Core ML float32. The vectors aren
   or when the app backgrounds.
 
 **WhisperKit**
-- First launch with no local model shows a blank Install base.en page that says Wi-Fi is needed. Later launches load the local copy and caption offline.
-- Transcribes each segment with word timestamps enabled.
+- First launch with no local model shows a blank Install small.en page that says Wi-Fi is needed (~470 MB one-time download). Later launches load the local copy and caption offline.
+- Transcribes each segment without word timestamps (nothing consumed them;
+  skipping the alignment pass keeps inference fast).
 - Emits a `caption` with `speaker_id` pending.
-- Stretch goal: streaming partial captions.
+- **Streaming partial captions (live):** while a VAD segment is still
+  growing, the VAD emits a snapshot of it (same `caption_id`) after 1 s and
+  then every 1.2 s. The pipeline transcribes only the newest snapshot
+  (stale ones are dropped, never queued) and the UI shows the result as a
+  provisional caption ("Listening…", dimmed) that updates in place. When
+  the segment ends, the final transcription replaces the provisional one;
+  only finals are saved, sent for tone, or kept in the transcript. A blank
+  final retracts its provisional caption. Provisional text is expected to
+  jitter and be revised; that is normal for live ASR.
 
 **Fusion** (plain code, no ML)
 ```
@@ -373,8 +394,8 @@ for caption [t0, t1]:
   Require three frames covering at least half the segment; absent faces contribute zero.
   Segment speaker IDs reach live cards, transcript, local saves, exports and the dashboard.
 - When a `tone_result` arrives, attach its tag to the caption by `caption_id`.
-  A live caption can wait up to 30 additional seconds for a pending result.
-  If a tag arrives during that wait, keep the caption visible for two more seconds.
+  Live captions persist for the whole session, so a late tag simply lands on
+  its caption whenever it arrives; there is no on-screen expiry to defer.
 
 **SoundAnalysis**
 - Filter to an allowlist: doorbell, knock, smoke/fire alarm, siren, dog bark, baby cry, laughter, phone ring.
@@ -401,7 +422,17 @@ for caption [t0, t1]:
   until captions exist and pending transcriptions finish. A visible status and VoiceOver
   announcement confirm success. Saved transcripts are under Home → Saved sessions.
 - Live caption list, with the speaker name/color matching a highlight box drawn on that face.
-  On landscape iPhones, the two newest live captions appear in a centered column over the camera.
+  The camera feed fills the whole live screen — there is no separate caption
+  section. The latest caption for each speaker is drawn **over the feed,
+  right under that speaker's face box**, as soon as it arrives (streaming
+  partials included), and stays until that speaker's next caption replaces
+  it. Live overlay text is phrase-sized (the last ~8 words); the transcript
+  keeps the full sentences. A caption whose speaker has no visible face
+  (unknown speaker, or they stepped out of frame) shows at the bottom of
+  the feed instead, so no caption is ever hidden — except with exactly one
+  face on screen, where the (display-only) caption goes under that face,
+  since the strict mouth-motion scorer often says "unknown" for the only
+  person talking. Stored speaker attribution is unchanged by this.
 - Combined A2/A3 demo places matching large Start/Stop listening and calibration
   controls above the caption feed, with sound banners, haptics, and accessibility
   announcements. Stop clears the current banner while pending captions finish.

@@ -10,12 +10,16 @@ public struct LiveCaption: Identifiable, Equatable {
     public var speakerName: String
     public var toneTag: String?
     public var text: String
+    /// True while this is a provisional (still-being-spoken) transcription;
+    /// the final caption with the same id replaces it.
+    public var isPartial: Bool
 
-    public init(id: UUID = UUID(), speakerName: String, toneTag: String? = nil, text: String, speakerID: String? = nil) {
+    public init(id: UUID = UUID(), speakerName: String, toneTag: String? = nil, text: String, speakerID: String? = nil, isPartial: Bool = false) {
         self.id = id
         self.speakerName = speakerName
         self.speakerID = speakerID ?? speakerName
         self.toneTag = toneTag
         self.text = text
+        self.isPartial = isPartial
     }
 }

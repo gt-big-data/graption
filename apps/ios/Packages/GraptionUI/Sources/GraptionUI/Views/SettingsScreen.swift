@@ -16,6 +16,7 @@ public struct SettingsScreen: View {
 
     private let manualThresholdDB: Binding<Double>?
     private let manualThresholdEnabled: Binding<Bool>
+    private let skipCalibrationEnabled: Binding<Bool>
     private let micPreviewActive: Bool
     private let micPreviewLevel: Double
     private let micPreviewBreached: Bool
@@ -30,6 +31,7 @@ public struct SettingsScreen: View {
         onPairMac: ((String) async throws -> Void)? = nil,
         manualThresholdDB: Binding<Double>? = nil,
         manualThresholdEnabled: Binding<Bool> = .constant(false),
+        skipCalibrationEnabled: Binding<Bool> = .constant(true),
         micPreviewActive: Bool = false,
         micPreviewLevel: Double = 0,
         micPreviewBreached: Bool = false,
@@ -43,6 +45,7 @@ public struct SettingsScreen: View {
         self.onPairMac = onPairMac
         self.manualThresholdDB = manualThresholdDB
         self.manualThresholdEnabled = manualThresholdEnabled
+        self.skipCalibrationEnabled = skipCalibrationEnabled
         self.micPreviewActive = micPreviewActive
         self.micPreviewLevel = micPreviewLevel
         self.micPreviewBreached = micPreviewBreached
@@ -224,6 +227,16 @@ public struct SettingsScreen: View {
             Text("Speech Detection")
                 .font(.title3.bold())
                 .foregroundStyle(Color.graptionAccent)
+
+            Toggle("Quick start (skip calibration)", isOn: skipCalibrationEnabled)
+                .tint(Color.graptionAccent)
+
+            Text("Captions start immediately with a low fixed speech threshold "
+                + "(−60 dB), instead of the 3-second room calibration. Best for "
+                + "demos and quiet rooms; in noisy rooms it may caption extra "
+                + "sounds. Turn off to measure the room each time you listen.")
+                .font(.footnote)
+                .foregroundStyle(Color.graptionSecondaryText)
 
             Toggle("Manual threshold", isOn: manualThresholdEnabled)
                 .tint(Color.graptionAccent)

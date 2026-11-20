@@ -783,6 +783,51 @@ struct CameraView: View {
                                     color: colorForSpeaker(face.id)
                                 )
                             }
+
+                            // Latest caption for each visible speaker, drawn
+                            // over the feed right under their face as soon as
+                            // it arrives (partials included).
+                            ForEach(controller.faces) { face in
+                                if let caption = displayCaption(for: face.id) {
+                                    let rect = viewRect(for: face.box, in: geometry.size)
+                                    let bubbleWidth = min(max(rect.width, 170), 250)
+                                    let centerX = min(
+                                        max(rect.midX, bubbleWidth / 2 + 6),
+                                        geometry.size.width - bubbleWidth / 2 - 6
+                                    )
+                                    // Under the face; above it when the face
+                                    // is too close to the bottom of the screen.
+                                    let underY = rect.maxY + 46
+                                    let centerY = underY + 40 <= geometry.size.height
+                                        ? underY
+                                        : max(rect.minY - 46, 40)
+                                    SpeakerCaptionBubble(caption: caption)
+                                        .frame(width: bubbleWidth)
+                                        .position(x: centerX, y: centerY)
+                                        .transition(.opacity)
+                                }
+                            }
+
+                            // Captions whose speaker has no visible face right
+                            // now (unknown speaker, or they stepped out of
+                            // frame) still show immediately, at the bottom of
+                            // the feed instead of under a face. With exactly
+                            // one face on screen there are none: that person
+                            // gets the caption under their face instead (see
+                            // `displayCaption(for:)`).
+                            let orphans = bottomCaptions
+                            if !orphans.isEmpty {
+                                VStack(spacing: 8) {
+                                    ForEach(orphans) { caption in
+                                        SpeakerCaptionBubble(caption: caption)
+                                            .frame(maxWidth: 320)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 20)
+                                .transition(.opacity)
+                            }
                         }
                     }
                     .ignoresSafeArea()
@@ -839,6 +884,50 @@ struct CameraView: View {
         .onDisappear { controller.previewDidDisappear() }
     }
 
+    /// The latest caption attributed to a tracked face (`captions` arrives
+    /// newest-first from ContentView, one per speaker).
+    private func caption(for speakerID: String) -> LiveCaption? {
+        captions.first { $0.speakerID == speakerID }
+    }
+
+    /// Caption to draw under a face. The mouth-motion scorer is strict and
+    /// often says "unknown", but with exactly one face on screen there is
+    /// only one person the words can belong to — so that face takes the
+    /// newest caption even when it arrived unattributed. Display-only: the
+    /// stored speaker attribution is untouched. With two or more faces an
+    /// unknown caption stays at the bottom rather than risk putting words
+    /// under the wrong person.
+    private func displayCaption(for speakerID: String) -> LiveCaption? {
+        guard controller.faces.count == 1 else { return caption(for: speakerID) }
+        let visibleIDs = Set(controller.faces.map(\.id))
+        return captions.first { $0.speakerID == speakerID || !visibleIDs.contains($0.speakerID) }
+    }
+
+    /// Captions to show at the bottom of the feed: unattributed ones when
+    /// there isn't a single obvious face to put them under.
+    private var bottomCaptions: [LiveCaption] {
+        guard controller.faces.count != 1 else { return [] }
+        let visibleIDs = Set(controller.faces.map(\.id))
+        return captions.filter { !visibleIDs.contains($0.speakerID) }
+    }
+
+    /// Converts a normalized face box (top-left origin, in analyzed-frame
+    /// coordinates) into preview coordinates. The preview fills the screen
+    /// (`.resizeAspectFill`), so the rendered frame is scaled to cover and
+    /// cropped equally on the overflowing axis — same math as `FaceBox`.
+    private func viewRect(for box: CGRect, in size: CGSize) -> CGRect {
+        let sourceAspectRatio = controller.captureAspectRatio
+        let scale = max(size.width / sourceAspectRatio, size.height)
+        let renderedWidth = sourceAspectRatio * scale
+        let renderedHeight = scale
+        return CGRect(
+            x: box.minX * renderedWidth - (renderedWidth - size.width) / 2,
+            y: box.minY * renderedHeight - (renderedHeight - size.height) / 2,
+            width: box.width * renderedWidth,
+            height: box.height * renderedHeight
+        )
+    }
+
     private func statusMessage(_ title: String, detail: String, systemImage: String) -> some View {
         VStack(spacing: 12) {
             Image(systemName: systemImage)
@@ -851,6 +940,54 @@ struct CameraView: View {
         }
         .foregroundStyle(.white)
         .padding()
+    }
+}
+
+/// Compact caption drawn over the camera feed under a speaker's face.
+/// Phrase-sized text only (trimmed in ContentView); the full sentence
+/// lives in the transcript. Partial (still-being-spoken) text is dimmed.
+private struct SpeakerCaptionBubble: View {
+    let caption: LiveCaption
+
+    var body: some View {
+        let speakerColor = colorForSpeaker(caption.speakerID)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(caption.speakerName)
+                    .font(.caption.bold())
+                    .foregroundStyle(speakerColor)
+                if let tag = caption.toneTag {
+                    Text(tag)
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.white.opacity(0.18), in: Capsule())
+                }
+                if caption.isPartial {
+                    Text("Listening…")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+            }
+            Text(caption.text)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.white.opacity(caption.isPartial ? 0.7 : 1))
+                .shadow(color: .black.opacity(0.75), radius: 2, y: 1)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(speakerColor.opacity(0.6), lineWidth: 1.5)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+        .animation(.easeOut(duration: 0.25), value: caption.toneTag)
+        .accessibilityElement(children: .combine)
     }
 }
 

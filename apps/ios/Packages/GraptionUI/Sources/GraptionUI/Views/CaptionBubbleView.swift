@@ -28,9 +28,18 @@ struct CaptionBubbleView: View {
 
             Text(caption.text)
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.white.opacity(caption.isPartial ? 0.65 : 1))
                 .shadow(color: .black.opacity(0.75), radius: 2, y: 1)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if caption.isPartial {
+                // Still being spoken: this text will be replaced by the
+                // final transcription of the same caption.
+                Text("Listening…")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.white.opacity(0.6))
+                    .accessibilityLabel("Still listening")
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

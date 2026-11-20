@@ -11,6 +11,16 @@ public final class EnergyVAD {
     private var segmentStart: TimeInterval?
     private var segmentSamples: [Float] = []
     private var silenceDuration: TimeInterval = 0
+    /// Identity of the in-progress segment, shared by its partial snapshots
+    /// and its final segment so the UI can update one caption in place.
+    private var currentCaptionID: UUID?
+    private var lastPartialSampleCount = 0
+    /// Called with a snapshot of the in-progress segment roughly every
+    /// `partialIntervalSamples` once it reaches `minPartialSamples`, for
+    /// live (provisional) transcription. Never called for finished segments.
+    public var onPartialSegment: ((AudioSegment) -> Void)?
+    private static let minPartialSamples = 16_000 // 1 s at 16 kHz
+    private static let partialIntervalSamples = 19_200 // 1.2 s at 16 kHz
     // Keep 300 ms before activation so quieter word beginnings reach the ASR model.
     private var preRollSamples: [Float] = []
     private let maxPreRollSamples = 4_800
@@ -97,12 +107,14 @@ public final class EnergyVAD {
             // Begin a segment when speech is detected while idle.
             if isSpeech && segmentStart == nil {
                 segmentStart = chunkStart - Double(preRollSamples.count) / sampleRate
+                currentCaptionID = UUID()
+                lastPartialSampleCount = 0
                 segmentSamples.append(contentsOf: preRollSamples)
                 preRollSamples.removeAll(keepingCapacity: true)
             }
 
             // Retain a bounded look-back while idle; never emit silence alone.
-            if segmentStart != nil {
+            if let start = segmentStart {
                 // Keep quiet samples too, preserving pauses.
                 segmentSamples.append(contentsOf: chunk)
 
@@ -114,11 +126,25 @@ public final class EnergyVAD {
 
                 // Finish after 500 ms of consecutive silence
                 // or exactly 10 seconds of collected audio.
-                if silenceDuration >= 0.5
-                    || segmentSamples.count >= maxSegmentSamples {
+                let finishing = silenceDuration >= 0.5
+                    || segmentSamples.count >= maxSegmentSamples
+                if finishing {
                     if let segment = finishSegment() {
                         completed.append(segment)
                     }
+                } else if let id = currentCaptionID,
+                          segmentSamples.count >= Self.minPartialSamples,
+                          segmentSamples.count - lastPartialSampleCount
+                            >= Self.partialIntervalSamples {
+                    // Snapshot for provisional transcription; the segment
+                    // keeps growing and will still finish normally.
+                    lastPartialSampleCount = segmentSamples.count
+                    onPartialSegment?(AudioSegment(
+                        samples: segmentSamples,
+                        tStart: start,
+                        tEnd: chunkStart + duration,
+                        captionID: id
+                    ))
                 }
             } else {
                 // Keep only the latest 300 ms, even if this input buffer is larger.
@@ -148,6 +174,8 @@ public final class EnergyVAD {
     /// Discard unfinished audio when cancelling a session.
     public func reset() {
         segmentStart = nil
+        currentCaptionID = nil
+        lastPartialSampleCount = 0
         segmentSamples.removeAll(keepingCapacity: true)
         preRollSamples.removeAll(keepingCapacity: true)
         silenceDuration = 0
@@ -183,7 +211,8 @@ public final class EnergyVAD {
         let segment = AudioSegment(
             samples: segmentSamples,
             tStart: start,
-            tEnd: start + Double(segmentSamples.count) / sampleRate
+            tEnd: start + Double(segmentSamples.count) / sampleRate,
+            captionID: currentCaptionID ?? UUID()
         )
 
         reset()

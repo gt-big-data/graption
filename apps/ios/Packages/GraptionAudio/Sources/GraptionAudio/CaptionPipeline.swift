@@ -15,6 +15,10 @@ public final class CaptionPipeline {
     public private(set) var isReady = false
     public private(set) var isPreparing = false
     public var onResult: ((Delivery) -> Void)?
+    /// Provisional results for in-progress segments, delivered on
+    /// `onPartialResult` instead: the same caption ID arrives again as a
+    /// final on `onResult` when the segment ends.
+    public var onPartialResult: ((Delivery) -> Void)?
     public var onError: ((UUID?, Error) -> Void)?
 
     private let transcriber: any CaptionTranscriber
@@ -22,6 +26,10 @@ public final class CaptionPipeline {
     private var pending: [(AudioSegment, ContinuousClock.Instant)] = []
     private var isProcessing = false
     private var generation = 0
+    /// Latest-only partial lane: a newer snapshot supersedes an unstarted
+    /// or in-flight stale one, so partials never queue up behind finals.
+    private var latestPartial: AudioSegment?
+    private var isPartialProcessing = false
 
     public init(transcriber: any CaptionTranscriber = WhisperKitTranscriber(),
                 maxPendingSegments: Int = 8) {
@@ -53,10 +61,45 @@ public final class CaptionPipeline {
         Task { await drain() }
     }
 
+    /// Queue a provisional snapshot of a still-growing segment. Only the
+    /// newest snapshot matters; stale ones are dropped, never queued.
+    public func enqueuePartial(_ segment: AudioSegment) {
+        guard isReady else { return }
+        latestPartial = segment
+        guard !isPartialProcessing else { return }
+        isPartialProcessing = true
+        Task { await drainPartials() }
+    }
+
+    private func drainPartials() async {
+        defer { isPartialProcessing = false }
+        while let segment = latestPartial {
+            latestPartial = nil
+            let session = generation
+            let started = ContinuousClock.now
+            let receivedAt = ContinuousClock.now
+            do {
+                let result = try await transcriber.transcribe(segment)
+                guard session == generation else { return }
+                // A newer snapshot arrived mid-transcription: this text is
+                // already stale, so skip delivery and take the newer one.
+                guard latestPartial == nil else { continue }
+                onPartialResult?(Delivery(result: result,
+                                          segment: segment,
+                                          transcriptionSeconds: Self.seconds(started.duration(to: .now)),
+                                          receivedAt: receivedAt))
+            } catch {
+                // Partials are best-effort; the final segment still follows.
+                guard session == generation else { return }
+            }
+        }
+    }
+
     /// Discard queued work and suppress an old session's in-flight result.
     public func reset() {
         generation += 1
         pending.removeAll()
+        latestPartial = nil
     }
 
     private func drain() async {

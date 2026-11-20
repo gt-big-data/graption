@@ -87,12 +87,6 @@ public struct LiveCaptionScreen: View {
 
     private var isLandscape: Bool { verticalSizeClass == .compact }
 
-    /// Landscape leaves little height, so it keeps the two newest captions
-    /// (captions arrive oldest first) to keep faces in view.
-    private var onScreenCaptions: [LiveCaption] {
-        isLandscape ? Array(displayedCaptions.suffix(2)) : displayedCaptions
-    }
-
     private var displayedAlert: SoundAlert? {
         usesLiveAudio ? suppliedAlert : simulator.soundAlert
     }
@@ -119,6 +113,9 @@ public struct LiveCaptionScreen: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
+                // The camera feed fills the screen; captions are drawn
+                // over it under each speaker's face by the camera view
+                // itself. There is no separate caption section.
                 videoArea
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(alignment: .topLeading) {
@@ -198,21 +195,6 @@ public struct LiveCaptionScreen: View {
                 dest()
             } else {
                 LiveVideoFeedView(captions: displayedCaptions)
-            }
-
-            if !displayedCaptions.isEmpty && cameraPreviewDestination != nil {
-                // In landscape, a centered column like meeting subtitles,
-                // narrow enough to leave the people on either side visible.
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(onScreenCaptions) { caption in
-                        CaptionBubbleView(caption: caption)
-                            .transition(.opacity)
-                    }
-                }
-                .frame(maxWidth: isLandscape ? 560 : .infinity, alignment: .leading)
-                .padding(isLandscape ? 8 : 12)
-                .frame(maxWidth: .infinity, alignment: isLandscape ? .center : .leading)
-                .animation(.easeOut(duration: 0.3), value: onScreenCaptions.map(\.id))
             }
         }
     }

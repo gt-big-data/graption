@@ -169,6 +169,6 @@ ASR_URL = ws:/$()/192.168.1.10:8000
 Use the Mac's LAN address, with no `/ws/asr` suffix; the client appends it.
 This setting opts into sending completed speech segments to your Mac. Keep it
 empty for iPhone-only captions. Use a trusted network, allow Local Network access,
-and provision WhisperKit base.en. Speak and pause; confirm “Mac captions.”
+and provision WhisperKit small.en. Speak and pause; confirm “Mac captions.”
 Stop the Mac server and speak again; confirm “iPhone captions.” Tone configuration
 is independent. Keep development tokens out of committed configuration.

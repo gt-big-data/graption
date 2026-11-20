@@ -23,7 +23,15 @@ struct ContentView: View {
     @State private var meetingSync = MeetingSyncClient()
     @State private var pairedMac = MacPairing.load()
     @State private var pairingRevision = UUID()
-    @State private var showHomeScreen = true
+    // Demo-first launch: open on the live camera, not Home. Home is still
+    // one tap away via the live screen's Home button.
+    @State private var showHomeScreen = false
+    /// Set when entering the live screen; consumed by the first auto-start so
+    /// a manual Stop is never immediately overridden.
+    @State private var autoListenArmed = true
+    /// Quick start: skip the 3 s room calibration and use a low fixed
+    /// threshold (-60 dBFS) so captions begin immediately. Persisted.
+    @AppStorage("skipRoomCalibration") private var skipRoomCalibration = true
     @State private var showTranscript = false
     @State private var showSettings = false
     @State private var showSavedSessions = false
@@ -54,14 +62,11 @@ struct ContentView: View {
     @State private var previewError: String?
     @State private var isPreparing = false
     @State private var isReady = false
-    @State private var status = "Loading base.en…"
+    @State private var status = "Loading small.en…"
     @State private var setupFailed = false
     @State private var toneVersions: [UUID: String] = [:]
     @State private var toneTags: [UUID: String] = [:]
     @State private var captions: [CaptionEntry] = []
-    /// Captions whose on-screen time is up. They leave the camera view but stay in the transcript.
-    @State private var expiredCaptionIDs: Set<UUID> = []
-    @State private var deferredExpiryIDs: Set<UUID> = []
     @State private var listenTask: Task<Void, Never>?
 
     private var canListen: Bool {
@@ -69,40 +74,29 @@ struct ContentView: View {
             && (isRecording || (pendingCaptions == 0 && !flushingCapture))
     }
 
-    /// At most three unexpired captions, oldest first, matching the three-bubble layout.
+    /// Live overlay captions: the latest caption per speaker, drawn over
+    /// the camera feed under that speaker's face (see CameraView). Each is
+    /// phrase-sized — the last few words — so it fits under a face; the
+    /// transcript keeps the full sentences. `captions` is newest-first, so
+    /// the first entry seen for a speaker is their latest.
     private var bubbleCaptions: [LiveCaption] {
-        Array(captions.filter { !expiredCaptionIDs.contains($0.id) }.prefix(3))
-            .reversed()
-            .map { entry in
-                LiveCaption(id: entry.id, speakerName: speakerLabel(entry.speakerID),
-                    toneTag: toneTags[entry.id], text: entry.text, speakerID: entry.speakerID)
-            }
-    }
-
-    /// How long a caption stays over the camera: reading time at 2.5 words per second
-    /// (150 wpm, the adult rate in DCMP captioning guidance), held for 4 to 8 seconds.
-    static func onScreenSeconds(for text: String) -> Double {
-        let words = text.split(whereSeparator: \.isWhitespace).count
-        return min(8, max(4, Double(words) / 2.5))
-    }
-
-    private func scheduleExpiry(of entry: CaptionEntry) {
-        let id = entry.id
-        let seconds = Self.onScreenSeconds(for: entry.text)
-        Task {
-            try? await Task.sleep(for: .seconds(seconds))
-            if captionRecorders[id] != nil, captions.contains(where: { $0.id == id }) {
-                deferredExpiryIDs.insert(id)
-                try? await Task.sleep(for: .seconds(30))
-                guard deferredExpiryIDs.remove(id) != nil else { return }
-            }
-            expireCaption(id)
+        var seenSpeakers: Set<String> = []
+        return captions.compactMap { entry in
+            guard seenSpeakers.insert(entry.speakerID).inserted else { return nil }
+            return LiveCaption(id: entry.id, speakerName: speakerLabel(entry.speakerID),
+                toneTag: toneTags[entry.id], text: Self.quickCaptionPhrase(entry.text),
+                speakerID: entry.speakerID, isPartial: entry.isPartial)
         }
     }
 
-    private func expireCaption(_ id: UUID) {
-        guard captions.contains(where: { $0.id == id }) else { return }
-        expiredCaptionIDs.insert(id)
+    /// Quick-caption view of an in-progress sentence: the last
+    /// `maxWords` words, prefixed with an ellipsis when earlier words
+    /// were cut. Keeps the live overlay phrase-sized instead of re-printing
+    /// a whole growing sentence.
+    static func quickCaptionPhrase(_ text: String, maxWords: Int = 8) -> String {
+        let words = text.split(whereSeparator: \.isWhitespace)
+        guard words.count > maxWords else { return text }
+        return "…" + words.suffix(maxWords).joined(separator: " ")
     }
 
     private var bannerAlert: GraptionUI.SoundAlert? {
@@ -126,6 +120,7 @@ struct ContentView: View {
                         set: { manualThresholdDB = $0 }
                     ),
                     manualThresholdEnabled: $useManualThreshold,
+                    skipCalibrationEnabled: $skipRoomCalibration,
                     micPreviewActive: previewCapture != nil,
                     micPreviewLevel: Double(previewLevel),
                     micPreviewBreached: previewLevel >= EnergyVAD.rmsThreshold(
@@ -232,13 +227,32 @@ struct ContentView: View {
         .task(id: pairingRevision) {
             do { sessionStore = try FileSessionStore.onDevice() }
             catch { persistenceError = error.localizedDescription }
+            startListeningIfNeeded()
             while !Task.isCancelled {
                 await syncMeetings()
                 do { try await Task.sleep(for: .seconds(15)) } catch { break }
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active, isRecording || isCalibrating { stopListening() }
+            if phase == .active {
+                startListeningIfNeeded()
+            } else if isRecording || isCalibrating {
+                // Mic defaults on: resume after backgrounding interrupted it,
+                // but not after a manual Stop (autoListenArmed stays false then
+                // because stopListening() here is system-initiated).
+                autoListenArmed = true
+                stopListening()
+            }
+        }
+        .onChange(of: isReady) { _, _ in
+            startListeningIfNeeded()
+        }
+        .onChange(of: showHomeScreen) { _, isHome in
+            // Re-entering live captions re-arms the default-on microphone.
+            if !isHome {
+                autoListenArmed = true
+                startListeningIfNeeded()
+            }
         }
         .animation(.default, value: soundAlertModel.currentAlert?.id)
         .sensoryFeedback(.warning, trigger: soundAlertModel.currentAlert?.id) { _, new in
@@ -249,17 +263,9 @@ struct ContentView: View {
             toneMonitor.onToneDetails = { event in
                 guard let captionID = event.captionID, let id = UUID(uuidString: captionID),
                       let owner = captionRecorders.removeValue(forKey: id) else { return }
+                // Captions persist on screen, so a late tag simply lands on
+                // its caption whenever it arrives; no expiry to defer.
                 toneTags[id] = event.tag
-                if deferredExpiryIDs.remove(id) != nil {
-                    if event.tag == nil {
-                        expireCaption(id)
-                    } else {
-                        Task {
-                            try? await Task.sleep(for: .seconds(2))
-                            expireCaption(id)
-                        }
-                    }
-                }
                 let modelVersion = event.modelVersion ?? "unknown"
                 toneVersions[id] = modelVersion
                 let probs = event.probs.map {
@@ -292,6 +298,7 @@ struct ContentView: View {
                 printKnownLabelsOnce()
                 configureCallbacks()
                 await prepareModel(allowDownload: false)
+                startListeningIfNeeded()
             } catch {
                 report(error)
             }
@@ -403,6 +410,12 @@ struct ContentView: View {
                     tStart: segment.tStart, tEnd: segment.tEnd, samples: segment.samples)
             }
         }
+        capture.onPartialSegment = { segment in
+            // Provisional transcription only; nothing is saved or sent for
+            // tone until the final segment lands in onSegment above.
+            guard isVisible, isRecording, !isCalibrating else { return }
+            pipeline.enqueuePartial(segment)
+        }
         capture.onError = { error in
             if isCalibrating {
                 isCalibrating = false
@@ -415,6 +428,38 @@ struct ContentView: View {
         pipeline.onError = { id, error in
             captionFinished()
             report(error, captionID: id)
+        }
+        pipeline.onPartialResult = { delivery in
+            // Live provisional caption: create or update the card for this
+            // caption ID in place. The final result (onResult) replaces it.
+            // While speaking, only the current phrase is shown — the last
+            // few words — like quick live captions; the full sentence
+            // arrives with the final.
+            let caption = delivery.result
+            let fullText = caption.text
+                .replacingOccurrences(of: "[BLANK_AUDIO]", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let displayText = Self.quickCaptionPhrase(fullText)
+            guard !displayText.isEmpty else { return }
+            if let index = captions.firstIndex(where: { $0.id == caption.captionID }) {
+                captions[index].text = displayText
+                captions[index].isPartial = true
+                // Mouth scores build up as the segment grows, so a caption
+                // that started "unknown" can earn its speaker on a later
+                // partial instead of staying unknown for good.
+                let updatedSpeaker = cameraController.speaker(from: caption.tStart, to: caption.tEnd)
+                if updatedSpeaker != "unknown" {
+                    captions[index].speakerID = updatedSpeaker
+                }
+            } else {
+                captions.insert(CaptionEntry(
+                    result: caption,
+                    text: displayText,
+                    transcriptionSeconds: delivery.transcriptionSeconds,
+                    speakerID: cameraController.speaker(from: caption.tStart, to: caption.tEnd),
+                    isPartial: true
+                ), at: 0)
+            }
         }
         pipeline.onResult = { delivery in
             defer { captionFinished() }
@@ -446,14 +491,27 @@ struct ContentView: View {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let isBlankAudio = caption.text.contains("[BLANK_AUDIO]") && displayText.isEmpty
             let isShortEmpty = caption.tEnd - caption.tStart < 1 && displayText.isEmpty
-            guard !isBlankAudio, !isShortEmpty else { return }
+            guard !isBlankAudio, !isShortEmpty else {
+                // A blank final retracts any provisional text it produced.
+                captions.removeAll { $0.id == caption.captionID && $0.isPartial }
+                return
+            }
             // Stable caption IDs keep cards distinct when newer results arrive.
-            let entry = CaptionEntry(
+            var entry = CaptionEntry(
                 result: caption,
                 text: displayText.isEmpty ? "[No speech recognized]" : displayText,
                 transcriptionSeconds: delivery.transcriptionSeconds,
                 speakerID: speakerByCaption.removeValue(forKey: caption.captionID) ?? "unknown"
             )
+            // Replace a provisional caption for this ID in place; the final
+            // is saved exactly once, here, never for partials.
+            if let index = captions.firstIndex(where: { $0.id == caption.captionID }) {
+                entry.speakerID = entry.speakerID == "unknown"
+                    ? captions[index].speakerID : entry.speakerID
+                captions[index] = entry
+            } else {
+                captions.insert(entry, at: 0)
+            }
             recorder?.append(SavedCaption(id: caption.captionID, text: entry.text,
                 speakerID: entry.speakerID, toneTag: toneTags[caption.captionID],
                 tStart: caption.tStart, tEnd: caption.tEnd,
@@ -462,21 +520,32 @@ struct ContentView: View {
                 ) { _, new in new }, toneProbs: toneProbabilities[caption.captionID],
                 toneScores: toneScores[caption.captionID]))
             Task { await saveMeeting() }
-            captions.insert(entry, at: 0)
-            scheduleExpiry(of: entry)
         }
+    }
+
+    /// Mic defaults on: start listening once the live screen is showing, the
+    /// model and capture exist, and the session store is loaded. Consumed on
+    /// first use so a manual Stop (or a failed permission prompt) is respected
+    /// until the live screen is re-entered.
+    private func startListeningIfNeeded() {
+        guard autoListenArmed, isVisible, !showHomeScreen, !showSettings, !showTranscript,
+              isReady, capture != nil, sessionStore != nil,
+              !isRecording, !isCalibrating, !isStarting,
+              pendingCaptions == 0, !flushingCapture else { return }
+        autoListenArmed = false
+        listenTask = Task { await listen() }
     }
 
     private func prepareModel(allowDownload: Bool) async {
         guard !isPreparing else { return }
         isPreparing = true
         defer { isPreparing = false }
-        status = "Loading base.en…"
+        status = "Loading small.en…"
         do {
             try await pipeline.prepare(allowDownload: allowDownload)
             isReady = pipeline.isReady
             setupFailed = !isReady
-            status = isReady ? "Ready" : "Could not load base.en"
+            status = isReady ? "Ready" : "Could not load small.en"
         } catch {
             let missing = (error as? TranscriberError) == .modelNotProvisioned
             setupFailed = allowDownload || !missing
@@ -510,11 +579,13 @@ struct ContentView: View {
         toneScores.removeAll()
         toneVersions.removeAll()
         toneTags.removeAll()
-        expiredCaptionIDs.removeAll()
-        deferredExpiryIDs.removeAll()
         let manualDB = useManualThreshold ? (manualThresholdDB ?? initialManualThresholdDB) : nil
-        capture.setManualThreshold(manualDB)
-        if manualDB == nil {
+        // Quick start (default): no 3 s calibration countdown; a low fixed
+        // -60 dBFS threshold (the EnergyVAD floor) so speech is picked up
+        // immediately. Manual threshold, when enabled, takes precedence.
+        let quickStartDB: Double? = manualDB == nil && skipRoomCalibration ? -60 : nil
+        capture.setManualThreshold(manualDB ?? quickStartDB)
+        if manualDB == nil && quickStartDB == nil {
             do {
                 try capture.start(calibrating: true)
             } catch {
@@ -580,6 +651,8 @@ struct ContentView: View {
             try capture.start(sessionStartHostTime: hostTime)
             if manualDB != nil {
                 logSpeechThreshold(capture.currentThreshold, mode: "Manual")
+            } else if quickStartDB != nil {
+                logSpeechThreshold(capture.currentThreshold, mode: "Quick start")
             }
             isRecording = true
             status = "Listening"
@@ -703,7 +776,7 @@ private struct InstallBaseEnPage: View {
                 GraptionLogo()
                     .frame(width: 88, height: 88)
                     .padding(.bottom, 8)
-                Text("Install base.en")
+                Text("Install small.en")
                     .font(.largeTitle.bold())
                     .foregroundStyle(Color.graptionAccent)
                 Text("Wi-Fi is needed")
@@ -732,10 +805,12 @@ private struct InstallBaseEnPage: View {
 
 /// Presentation data only; the transcription/event contracts are unchanged.
 private struct CaptionEntry: Identifiable {
-    let result: TranscriptionResult
-    let text: String
-    let transcriptionSeconds: TimeInterval
-    let speakerID: String
+    var result: TranscriptionResult
+    var text: String
+    var transcriptionSeconds: TimeInterval
+    var speakerID: String
+    /// Provisional (still-being-spoken) text; the final result clears this.
+    var isPartial: Bool = false
     var id: UUID { result.captionID }
 }
 

@@ -16,9 +16,10 @@ public struct AudioSegment: Sendable {
     public init(
         samples: [Float],
         tStart: TimeInterval,
-        tEnd: TimeInterval
+        tEnd: TimeInterval,
+        captionID: UUID = UUID()
     ) {
-        self.captionID = UUID()
+        self.captionID = captionID
         self.samples = samples
         self.tStart = tStart
         self.tEnd = tEnd
